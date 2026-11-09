@@ -75,6 +75,18 @@ public class OperatorContext {
         return operator;
     }
 
+    /**
+     * 超管门槛。用在「角色与能力之外」的少数特权端点上（读全量快照、改系统状态、改模型配置）；
+     * 硬编码理由同 DelegationGuard 排除 CREATE_TABLE：生成模式仅超管，不该变成可配置项。
+     */
+    public Operator requireSuperAdmin() {
+        Operator operator = current();
+        if (!operator.isSuperAdmin()) {
+            throw new BizException(ErrorCode.FORBIDDEN, "仅超管可执行此操作");
+        }
+        return operator;
+    }
+
     public Set<String> capabilitiesOf(Long roleId) {
         List<RoleCapabilityEntity> rows = capabilityMapper.selectList(
                 Wrappers.<RoleCapabilityEntity>lambdaQuery().eq(RoleCapabilityEntity::getRoleId, roleId));

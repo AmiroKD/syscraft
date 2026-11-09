@@ -72,3 +72,7 @@ management:
 logging:
   level:
     com.generated.platform: INFO
+
+# 界面录入凭据的加密密钥（AES-256-GCM）。与数据库口令同源文件但绝不入库存明文
+syscraft:
+  secret: ${APP_SECRET:}

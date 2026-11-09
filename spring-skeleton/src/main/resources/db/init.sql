@@ -302,6 +302,24 @@ VALUES
 INSERT IGNORE INTO adm_state (id, initialized, current_version, snapshot_version, model_version)
 VALUES (1, 0, NULL, 0, 0);
 
+-- 13. adm_model_config 模型接入配置（单行）
+--     契约 2.2 的 PUT /api/system/model 要落库，但 4.8 的表清单没有它的位置（设计缺口，本次补上）。
+--     与 adm_state 分开建：状态表跟版本回滚走，配置是凭据、生命周期独立。
+--     api_key 只存密文：AES-256-GCM，密钥取环境变量 APP_SECRET，密文里带随机 IV。
+CREATE TABLE IF NOT EXISTS adm_model_config (
+    id          TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '恒为 1',
+    provider    VARCHAR(32)      NOT NULL COMMENT 'openai 兼容等',
+    base_url    VARCHAR(255)     NOT NULL COMMENT '如 https://api.openai.com/v1',
+    model       VARCHAR(64)      NOT NULL,
+    api_key_enc TEXT             NULL COMMENT 'AES-256-GCM 密文；NULL=尚未配置',
+    updated_at  DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT ck_model_config_singleton CHECK (id = 1)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '模型接入配置（单行）';
+
+INSERT IGNORE INTO adm_model_config (id, provider, base_url, model)
+VALUES (1, 'openai', 'https://api.openai.com/v1', 'gpt-4o-mini');
+
 -- ============================================================================
 -- 六、验收查询（只作说明，不自动执行；手工跑这四条即可核对）
 --

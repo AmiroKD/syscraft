@@ -108,6 +108,14 @@ class RequirementExtractor:
             raise schema_map.ModelValidationError(
                 [f"需求描述里包含疑似指令注入的内容（{injected!r}）。"
                  "请用自然语言描述业务需求，不要在需求里给系统下指令。"])
+        # answers 通道同样不可信：用户对追问的自由回答也拼接进 prompt，
+        # 只查需求文本会让注入从「回答」这条腿绕进来
+        for answer in answers or []:
+            injected = detect_injection(str(answer))
+            if injected:
+                raise schema_map.ModelValidationError(
+                    [f"对追问的回答里包含疑似指令注入的内容（{injected!r}）。"
+                     "请直接回答业务问题。"])
         messages = self._messages(requirement, answers or [])
         content = self._llm_call(messages)
         try:

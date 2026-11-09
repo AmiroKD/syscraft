@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "modelVersion": "v6",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-memo",
+      "category": "interface",
+      "level": "block",
+      "title": "备忘录 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/MemoController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/memo",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-memo",
+      "category": "interface",
+      "level": "block",
+      "title": "备忘录 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/MemoService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/memo",
+        "entity": "memo",
+        "account": "__acc_admin__",
+        "sample": {
+          "title": "Ttitle",
+          "content": "Tcontent",
+          "created_at": "2026-11-09T10:00:00",
+          "creator_id": 2
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/memo",
+        "entity": "memo",
+        "account": "__acc_admin__",
+        "sample": {
+          "title": "Ttitle",
+          "content": "Tcontent",
+          "created_at": "2026-11-09T10:00:00",
+          "creator_id": 2
+        },
+        "unique_fields": []
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/memo/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/memo/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/memo/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

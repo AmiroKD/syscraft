@@ -18,6 +18,7 @@ import com.generated.platform.common.Metric;
 import com.generated.platform.common.OrderBy;
 import com.generated.platform.common.PageResult;
 import com.generated.platform.common.QueryOps;
+import com.generated.platform.common.RowScope;
 import com.generated.platform.confirm.ConfirmExecutorRegistry;
 import com.generated.platform.confirm.ConfirmService;
 import org.springframework.stereotype.Service;
@@ -62,12 +63,15 @@ public class {{ class_name }}Service {
     private final {{ class_name }}Mapper mapper;
     private final ConfirmService confirmService;
     private final AuditService auditService;
+    private final RowScope rowScope;
 
     public {{ class_name }}Service({{ class_name }}Mapper mapper, ConfirmService confirmService,
-                                   ConfirmExecutorRegistry confirmExecutorRegistry, AuditService auditService) {
+                                   ConfirmExecutorRegistry confirmExecutorRegistry, AuditService auditService,
+                                   RowScope rowScope) {
         this.mapper = mapper;
         this.confirmService = confirmService;
         this.auditService = auditService;
+        this.rowScope = rowScope;
         // 注册影响行数计算器：确认预告据此算「这次会删多少条」，不用为每个实体手写预告逻辑
         confirmExecutorRegistry.register("{{ entity }}", ids -> {
             if (ids == null || ids.isEmpty()) {
@@ -85,6 +89,13 @@ public class {{ class_name }}Service {
     public PageResult<{{ class_name }}VO> query({{ class_name }}Query req) {
         LambdaQueryWrapper<{{ class_name }}> wrapper = Wrappers.lambdaQuery();
         applyFilter(wrapper, req == null ? null : req.filter());
+{% if owner_property %}
+        // 行级隔离（数据行级权限）：非超管只能看见归属是自己的行
+        Long __owner = rowScope.ownerId();
+        if (__owner != null) {
+            wrapper.eq({{ class_name }}::get{{ owner_getter }}, __owner);
+        }
+{% endif %}
 
         // total 走独立 COUNT，且必须在加 LIMIT 之前算
         long total = mapper.selectCount(wrapper);
@@ -115,6 +126,13 @@ public class {{ class_name }}Service {
             throw new BizException(ErrorCode.BAD_REQUEST, "聚合暂不支持 OR 条件，请拆成多次查询");
         }
         QueryWrapper<{{ class_name }}> wrapper = new QueryWrapper<>();
+{% if owner_property %}
+        // 行级隔离：聚合与查询同一口径，否则用户能从统计里拼出别人的数据
+        Long __ownerAgg = rowScope.ownerId();
+        if (__ownerAgg != null) {
+            wrapper.eq("{{ owner_column }}", __ownerAgg);
+        }
+{% endif %}
         List<String> select = new ArrayList<>();
 
         if (req.groupBy() != null) {
@@ -162,6 +180,11 @@ public class {{ class_name }}Service {
         if (entity == null) {
             throw new BizException(ErrorCode.BAD_REQUEST, "请求体不能为空");
         }
+{% if owner_property %}
+        // 归属写入：数据是谁的，创建那一刻就定死（行级隔离的另一半）。
+        // 必须在 validate 之前——owner 列的非空校验会先跑（实测踩过顺序）
+        entity.set{{ owner_getter }}(rowScope.currentUserId());
+{% endif %}
         validate(entity);
 {% if computed_rules %}
         applyComputed(entity);
@@ -179,6 +202,12 @@ public class {{ class_name }}Service {
         if (existing == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "记录不存在：" + entity.getId());
         }
+{% if owner_property %}
+        // 行级校验（403 优先于 400 的参数校验）：非超管改不动别人的行；
+        // 归属不可变——无论请求体带了什么，owner 保持原值（顺带满足非空校验）
+        rowScope.checkOwner(existing.get{{ owner_getter }}());
+        entity.set{{ owner_getter }}(existing.get{{ owner_getter }}());
+{% endif %}
         validate(entity);
 {% if computed_rules %}
         applyComputed(entity);
@@ -203,6 +232,12 @@ public class {{ class_name }}Service {
         if (ids.isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "ids 不能为空");
         }
+{% if owner_property %}
+        // 行级校验：非超管删不动别人的行（排在令牌核销前，403 不消耗令牌）
+        for ({{ class_name }} __row : mapper.selectByIds(ids)) {
+            rowScope.checkOwner(__row.get{{ owner_getter }}());
+        }
+{% endif %}
         String canonical = ids.stream().map(String::valueOf).collect(Collectors.joining(","));
         String tokenHash = confirmService.consume(req.confirmToken(), "DELETE", "{{ entity }}", canonical);
 

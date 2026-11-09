@@ -141,6 +141,17 @@ def to_business_model(ir: dict, model_version: str) -> dict:
             "primary_key": False, "nullable": False, "unique": False, "semantic": "创建时间",
             "visibility": "PLAIN", "sensitive": False,
         })
+        # owner_field 行级隔离（init.sql 语义）：声明了就自动补归属列，
+        # 结构性的东西由系统注入而不是靠 LLM 自觉（与 id/created_at 同一纪律）
+        owner_field = entity.get("ownerField")
+        if owner_field and not any(f["column"] == owner_field for f in fields_out):
+            prop = "".join(part.capitalize() for part in owner_field.split("_"))
+            prop = prop[0].lower() + prop[1:]
+            fields_out.append({
+                "column": owner_field, "property": prop, "type": "BIGINT",
+                "primary_key": False, "nullable": False, "unique": False,
+                "semantic": "归属用户", "visibility": "PLAIN", "sensitive": False,
+            })
 
         rules = _rules_out(entity.get("name"), entity.get("rules") or {}, fields_out)
         entities_out.append({

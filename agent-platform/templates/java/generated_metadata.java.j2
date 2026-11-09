@@ -1,0 +1,20 @@
+package com.generated.generated;
+
+import java.util.Map;
+
+/**
+ * 生成器写出的行级归属元数据（数据行级权限的登记处）。
+ *
+ * <p>SnapshotService 导出结构快照时读这里的 OWNER_FIELDS，合并进
+ * adm_entity_snapshot.owner_field——策略随产物走，产物脱离平台也自描述。</p>
+ */
+public final class GeneratedMetadata {
+
+    /** 实体 → 行级归属字段列名；不在表内 = 该实体不做行级隔离 */
+    public static final Map<String, String> OWNER_FIELDS = Map.ofEntries({% for entity, field in owner_fields.items() %}
+            Map.entry("{{ entity }}", "{{ field }}"){{ "," if not loop.last }}{% endfor %}
+    );
+
+    private GeneratedMetadata() {
+    }
+}

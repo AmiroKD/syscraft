@@ -212,6 +212,9 @@ class Pipeline:
             ["java", "-jar", str(jar), f"--server.port={self.port}"],
             stdout=open(log_file, "w"), stderr=subprocess.STDOUT,
             env={**os.environ},
+            # 守护化：产物进独立会话，不随流水线/平台进程组退出而陪葬
+            # （keep_running 的语义靠它才成立，实测踩过）；pkill -f 仍按名可及
+            start_new_session=True,
         )
         # 给端口绑定失败留出暴露时间：起 3 秒后子进程若已退出，直接判失败，
         # 免得健康检查打到别的进程身上

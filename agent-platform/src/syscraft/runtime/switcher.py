@@ -70,7 +70,9 @@ def switch(version: str) -> dict:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     _jar_process = subprocess.Popen(
         ["java", "-jar", str(jar), f"--server.port={config.SPRING_PORT}"],
-        stdout=open(log_file, "w"), stderr=subprocess.STDOUT, env={**os.environ})
+        stdout=open(log_file, "w"), stderr=subprocess.STDOUT, env={**os.environ},
+        # 守护化：切过去的版本不随平台重启而陪葬（产物生命周期归平台管，但不归平台进程组）
+        start_new_session=True)
     time.sleep(3)
     if _jar_process.poll() is not None:
         raise SwitchError(f"版本 {version} 启动即退出，见 {log_file}")

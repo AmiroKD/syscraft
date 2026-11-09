@@ -1,0 +1,22 @@
+{
+  "model_version": "v6",
+  "requirement": "备忘录管理：每个人只能看和管自己的备忘录（标题、内容）。",
+  "entities": [
+    {
+      "entity": "memo",
+      "class_name": "Memo",
+      "display_name": "备忘录",
+      "owner_field": "creator_id",
+      "fields": [
+        { "column": "id", "property": "id", "type": "BIGINT", "primary_key": true, "nullable": false, "unique": true, "semantic": "主键", "visibility": "PLAIN", "sensitive": false },
+        { "column": "title", "property": "title", "type": "VARCHAR", "length": 64, "primary_key": false, "nullable": false, "unique": false, "semantic": "标题", "visibility": "PLAIN", "sensitive": false },
+        { "column": "content", "property": "content", "type": "VARCHAR", "length": 255, "primary_key": false, "nullable": true, "unique": false, "semantic": "内容", "visibility": "PLAIN", "sensitive": false },
+        { "column": "created_at", "property": "createdAt", "type": "DATETIME", "primary_key": false, "nullable": false, "unique": false, "semantic": "创建时间", "visibility": "PLAIN", "sensitive": false }
+      ],
+      "rules": { "computed": [], "constraints": [], "states": [] }
+    }
+  ],
+  "grants": [
+    { "role": "USER", "entity": "memo", "access": "READ_WRITE" }
+  ]
+}

@@ -199,6 +199,9 @@ def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: s
     visible_fields = [f for f in fields if f.get("visibility") != "HIDDEN"]
 
     checks = build_checks(entity)
+    # 行级归属：模板据此渲染查询过滤/insert 写入/update·delete 校验
+    owner_column = entity.get("owner_field")
+    owner_field = next((f for f in fields if f["column"] == owner_column), None)
     context = {
         "entity": entity["entity"],
         "class_name": name,
@@ -207,6 +210,9 @@ def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: s
         "visible_fields": visible_fields,
         "imports": collect_imports(fields),
         "unique_keys": [f for f in fields if f.get("unique") and not f.get("primary_key")],
+        "owner_property": owner_field["property"] if owner_field else None,
+        "owner_getter": owner_field["getter"] if owner_field else None,
+        "owner_column": owner_column,
         **checks,
     }
 
@@ -239,6 +245,24 @@ def make_env(templates_dir: Path) -> Environment:
     )
 
 
+def _ensure_owner_field(entity: dict) -> None:
+    """行级隔离（init.sql：owner_field 为空表示不做行级隔离）：
+    模型声明了 owner_field 就自动补上归属列——靠 LLM 或手写模型自觉加列
+    迟早漏，结构性的东西由生成器兜住（与 id/created_at 同一纪律）。"""
+    owner = entity.get("owner_field")
+    if not owner:
+        return
+    if any(f["column"] == owner for f in entity["fields"]):
+        return
+    prop = "".join(part.capitalize() for part in owner.split("_"))
+    prop = prop[0].lower() + prop[1:]
+    entity["fields"].append({
+        "column": owner, "property": prop, "type": "BIGINT",
+        "primary_key": False, "nullable": False, "unique": False,
+        "semantic": "归属用户", "visibility": "PLAIN", "sensitive": False,
+    })
+
+
 def generate(model_path: Path, project_root: Path) -> dict:
     model_path = model_path.resolve()
     # 相对路径先落成绝对路径：下面要用 project_root.parent 去找同级骨架目录
@@ -267,8 +291,17 @@ def generate(model_path: Path, project_root: Path) -> dict:
     generated_root = version_dir / "src/main/java/com/generated/generated"
     written = {}
     for entity in model["entities"]:
+        _ensure_owner_field(entity)
         entity["_fields"] = [prepare_field(f) for f in entity["fields"]]
         written[entity["class_name"]] = render_entity(env, entity, generated_root, str(templates_dir))
+
+    # ②b 行级归属元数据：SnapshotService 导出快照时合并 owner_field 到 adm_entity_snapshot。
+    #    放生成物而不放模型文件——产物必须能脱离平台独立运行（契约 5 节第 4 条）
+    metadata_path = generated_root / "GeneratedMetadata.java"
+    metadata_path.write_text(env.get_template("java/generated_metadata.java.j2").render(
+        owner_fields={e["entity"]: e["owner_field"] for e in model["entities"] if e.get("owner_field")},
+    ), encoding="utf-8")
+    written["GeneratedMetadata"] = [str(metadata_path.relative_to(version_dir))]
 
     # ③ DDL 与默认授权（结构快照由产物启动时自查导出）
     ddl_dir = workspace / "scripts" / "ddl"

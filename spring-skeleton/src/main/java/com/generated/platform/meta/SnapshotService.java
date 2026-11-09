@@ -70,6 +70,9 @@ public class SnapshotService {
         List<TableMeta> tables = readTables();
         Set<String> present = new HashSet<>();
         long maxVersion = 0;
+        // 行级归属元数据来自生成器写出的 GeneratedMetadata（产物自描述）；
+        // 平台裸跑（无生成物）时为空 map，所有实体的 owner_field 归空
+        Map<String, String> ownerFields = generatedOwnerFields();
 
         for (TableMeta table : tables) {
             present.add(table.name());
@@ -86,7 +89,7 @@ public class SnapshotService {
             EntitySnapshotEntity row = existing == null ? new EntitySnapshotEntity() : existing;
             row.setEntity(table.name());
             row.setDisplayName(blankTo(table.comment(), table.name()));
-            row.setOwnerField(existing == null ? null : existing.getOwnerField());
+            row.setOwnerField(ownerFields.get(table.name()));
             row.setFieldCount(columns.size());
             row.setVersion(nextVersion);
             row.setGeneratedAt(LocalDateTime.now());
@@ -104,6 +107,17 @@ public class SnapshotService {
         prune(present);
         admJdbc.update("UPDATE adm_state SET snapshot_version = ? WHERE id = 1", maxVersion);
         return snapshot();
+    }
+
+    /** 生成的 GeneratedMetadata.OWNER_FIELDS；无生成物（平台裸跑）时为空 */
+    @SuppressWarnings("unchecked")
+    private Map<String, String> generatedOwnerFields() {
+        try {
+            Class<?> metadata = Class.forName("com.generated.generated.GeneratedMetadata");
+            return (Map<String, String>) metadata.getField("OWNER_FIELDS").get(null);
+        } catch (ReflectiveOperationException e) {
+            return Map.of();
+        }
     }
 
     public SnapshotView snapshot() {

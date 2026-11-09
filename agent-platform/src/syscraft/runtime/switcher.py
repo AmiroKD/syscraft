@@ -56,6 +56,10 @@ def switch(version: str) -> dict:
     if not jar.exists():
         raise SwitchError(f"版本 {version} 没有构建产物（jar 不存在），请先运行流水线")
 
+    # 切换失败的回滚锚点：必须在停旧之前读（审查 r6：停旧成功、起新失败
+    # 若无人拉回旧版本 = 全平台停机，与生成失败不回滚是同族漏洞）
+    previous = _current_version()
+
     # ① 停当前产物：只匹配自家 jar（运行组 stop_app 的语义）
     if _port_busy(config.SPRING_PORT) or _healthy(config.SPRING_PORT):
         subprocess.run(["pkill", "-f", "syscraft-skeleton-0.1.0.jar"], capture_output=True)
@@ -65,27 +69,20 @@ def switch(version: str) -> dict:
         if _port_busy(config.SPRING_PORT):
             raise SwitchError("旧产物停止失败，端口仍被占用")
 
-    # ② 起新版本
-    log_file = config.PROJECT_ROOT / "workspace/logs" / f"{version}-app.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    _jar_process = subprocess.Popen(
-        ["java", "-jar", str(jar), f"--server.port={config.SPRING_PORT}"],
-        stdout=open(log_file, "w"), stderr=subprocess.STDOUT, env={**os.environ},
-        # 守护化：切过去的版本不随平台重启而陪葬（产物生命周期归平台管，但不归平台进程组）
-        start_new_session=True)
-    time.sleep(3)
-    if _jar_process.poll() is not None:
-        raise SwitchError(f"版本 {version} 启动即退出，见 {log_file}")
-
-    deadline = time.time() + HEALTH_TIMEOUT_SECONDS
-    while time.time() < deadline:
-        if _jar_process.poll() is not None:
-            raise SwitchError(f"版本 {version} 进程提前退出，见 {log_file}")
-        if _healthy(config.SPRING_PORT):
-            break
-        time.sleep(1)
-    else:
-        raise SwitchError(f"版本 {version} 健康检查超时")
+    # ② 起新版本；失败把旧版本拉回来（尽力而为，回滚也失败就明示人工介入）
+    try:
+        pid = _start_and_wait(version)
+    except SwitchError as error:
+        if previous and previous != version:
+            try:
+                _start_and_wait(previous)
+            except SwitchError:
+                raise SwitchError(
+                    f"{error}；自动拉回 {previous} 也失败，需人工介入："
+                    f"POST /api/runtime/switch 到 {previous}")
+            raise SwitchError(f"{error}；已自动拉回旧版本 {previous}") from error
+        raise
+    _jar_process = _started_process
 
     # ③ 登记状态（Spring 管状态；失败不回滚进程——状态可以重登，进程别折腾）
     try:
@@ -95,7 +92,46 @@ def switch(version: str) -> dict:
                   json={"currentVersion": version}, timeout=5)
     except httpx.HTTPError:
         pass  # 状态登记失败不阻塞切换：下次 GET state 仍显示旧值，可重试
-    return {"version": version, "pid": _jar_process.pid}
+    return {"version": version, "pid": pid}
+
+
+_started_process: subprocess.Popen | None = None
+
+
+def _start_and_wait(version: str) -> int:
+    """起指定版本的 jar 并等健康；失败一律先清掉自己起的进程再抛 SwitchError，
+    否则残进程占着端口，回滚与重试都会撞端口（审查 r6）。"""
+    global _started_process
+    from syscraft.runtime.pipeline import _healthy
+
+    jar = (config.PROJECT_ROOT / "workspace/versions" / version
+           / "target/syscraft-skeleton-0.1.0.jar")
+    log_file = config.PROJECT_ROOT / "workspace/logs" / f"{version}-app.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    process = subprocess.Popen(
+        ["java", "-jar", str(jar), f"--server.port={config.SPRING_PORT}"],
+        stdout=open(log_file, "w"), stderr=subprocess.STDOUT, env={**os.environ},
+        # 守护化：切过去的版本不随平台重启而陪葬（产物生命周期归平台管，但不归平台进程组）
+        start_new_session=True)
+    _started_process = process
+    time.sleep(3)
+    if process.poll() is not None:
+        raise SwitchError(f"版本 {version} 启动即退出，见 {log_file}")
+
+    deadline = time.time() + HEALTH_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise SwitchError(f"版本 {version} 进程提前退出，见 {log_file}")
+        if _healthy(config.SPRING_PORT):
+            return process.pid
+        time.sleep(1)
+    # 健康超时：进程可能还占着端口，先停掉再报失败
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+    raise SwitchError(f"版本 {version} 健康检查超时（进程已停止），见 {log_file}")
 
 
 def current_version() -> str | None:

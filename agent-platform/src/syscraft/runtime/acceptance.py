@@ -101,6 +101,12 @@ class AcceptanceRunner:
             return {**base, "status": "FAIL", "message": str(failure),
                     "expected": failure.expected, "actual": failure.actual,
                     "suspects": case.get("suspects", [])}
+        except (AttributeError, KeyError) as error:
+            # 清单结构坏了（未知检查类型/缺字段）按单条 FAIL 处理：
+            # 不能让一条坏清单炸掉整个验收回合（审查 r6）
+            return {**base, "status": "FAIL",
+                    "message": f"验收清单结构错误：{error}",
+                    "suspects": case.get("suspects", [])}
         except httpx.HTTPError as error:
             return {**base, "status": "FAIL", "message": f"HTTP 异常：{error}",
                     "suspects": case.get("suspects", [])}

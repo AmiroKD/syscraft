@@ -55,10 +55,14 @@ class _IdentityCache:
     只兑底「产物不可达」（503）这一种情况；401 等鉴权错误照常抛。
     平台重启即空——运行也随进程死了，不存在跨重启的重连。"""
 
+    MAX_KEYS = 5_000  # 防涨：token 缓存无过期语义，超限整体重置（演示语义内足够大）
+
     def __init__(self):
         self._map: dict[str, dict] = {}
 
     def remember(self, token: str, user: dict) -> None:
+        if len(self._map) >= self.MAX_KEYS:
+            self._map.clear()
         self._map[token] = user
 
     def get(self, token: str) -> dict | None:

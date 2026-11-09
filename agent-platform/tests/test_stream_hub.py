@@ -51,3 +51,41 @@ def test_emit_after_finish_still_logged():
     hub.finish("s1")
     kinds = [e["type"] for e in hub.replay("s1")]
     assert kinds == ["phase", "text"]
+
+
+def test_no_truncation_gap_long_run():
+    """轮内不截断（审查 r5 留存项修复）：长流水线事件数超过旧上限 800，
+    重连补发也不能缺中间事件。"""
+    hub = StreamHub()
+    hub.begin("s1")
+    for i in range(1000):
+        hub.emit("s1", {"type": "log", "text": str(i)})
+    hub.finish("s1")
+    replayed = hub.replay("s1", after_seq=400)
+    assert len(replayed) == 600
+    assert replayed[0]["seq"] == 401  # 无缺口：第一补发事件紧接 after_seq
+
+
+def test_done_entries_swept_over_limit():
+    """done 条目回收：超上限时从最老的 done 驱起，running 永不驱。"""
+    from syscraft.conversation.stream_hub import MAX_TRACKED_SESSIONS
+    hub = StreamHub()
+    for i in range(MAX_TRACKED_SESSIONS):
+        sid = f"s{i}"
+        hub.begin(sid)
+        hub.emit(sid, {"type": "text"})
+        hub.finish(sid)
+    assert len(hub._runs) == MAX_TRACKED_SESSIONS
+    # 再开一个新会话 → 最老的 s0 被驱
+    hub.begin("new")
+    assert "s0" not in hub._runs
+    assert len(hub._runs) == MAX_TRACKED_SESSIONS
+    # running 条目不被驱：把所有条目变 done 之外的状态不行——直接验证
+    hub2 = StreamHub()
+    for i in range(MAX_TRACKED_SESSIONS + 5):
+        sid = f"r{i}"
+        hub2.begin(sid)          # 这些都保持 running
+    hub2.finish("r0")            # 只有一个 done
+    hub2.begin("extra")          # 超限 → 应驱 r0（唯一 done），running 全留
+    assert "r0" not in hub2._runs
+    assert all(f"r{i}" in hub2._runs for i in range(1, MAX_TRACKED_SESSIONS + 5))

@@ -89,6 +89,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST, msg));
     }
 
+    /**
+     * 请求体不可读（JSON 语法错、日期格式不对等）：400 而不是 500——
+     * 这是调用方的错，吞成 500 会把排障方向引到服务端（实测踩过：
+     * DATETIME 传「2026-11-10 10:00:00」而 Jackson 要 ISO 的 T 分隔，报错只剩一句 500）。
+     */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> onUnreadable(
+            org.springframework.http.converter.HttpMessageNotReadableException e) {
+        String detail = e.getMostSpecificCause().getMessage();
+        String msg = detail == null ? "请求体不可读" : "请求体不可读：" + detail;
+        return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST, msg));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> onOther(Exception e) {
         log.error("未预期异常", e);

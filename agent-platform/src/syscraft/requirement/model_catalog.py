@@ -55,11 +55,16 @@ class ModelCatalog:
         self._entities = entities
 
     @classmethod
-    def load(cls, models_dir: Path | None = None) -> "ModelCatalog":
+    def load(cls, models_dir: Path | None = None,
+             online_version: str | None = None) -> "ModelCatalog":
+        """online_version 给定时只加载该版本的模型（对话期用：产物里跑的
+        只有这一套接口，历史版本的实体查询只会 404）；None 加载全部。"""
         directory = models_dir or config.MODELS_DIR
         entities: dict[str, EntityInfo] = {}
         for path in sorted(directory.glob("*.json")):
             model = json.loads(path.read_text(encoding="utf-8"))
+            if online_version is not None and model.get("model_version") != online_version:
+                continue
             for entity in model.get("entities", []):
                 info = EntityInfo(
                     entity=entity["entity"],
@@ -94,6 +99,36 @@ class ModelCatalog:
         return self._entities.get(name)
 
 
+def reset_catalog_cache() -> None:
+    """清两个视角的缓存。生成完成后必须调：新模型文件要进全量目录、
+    工具白名单（online 视角换版本键后也一并清）要看见新实体。"""
+    _full_catalog.cache_clear()
+    _versioned_catalog.cache_clear()
+
+
 @lru_cache(maxsize=1)
-def catalog() -> ModelCatalog:
+def _full_catalog() -> ModelCatalog:
     return ModelCatalog.load()
+
+
+@lru_cache(maxsize=8)
+def _versioned_catalog(version: str) -> ModelCatalog:
+    # 键是版本号：切换/生成到新版本自然拿新目录，不会读到旧缓存
+    return ModelCatalog.load(online_version=version)
+
+
+def catalog(online_only: bool = False) -> ModelCatalog:
+    """能力目录的两个视角（审查 r5 留存项：目录与在线版本漂移）：
+
+    - online_only=False（全量历史）：抽取防重名用——biz 库的历史表都还在，
+      新实体不能与任何旧版本撞名。
+    - online_only=True（仅在线版本）：对话期实体解析/工具白名单用——产物里
+      只有这一套接口，历史实体的查询只会 404。版本读不到（产物停机）时
+      退回全量，行为与旿改前一致。"""
+    if not online_only:
+        return _full_catalog()
+    from syscraft.runtime.switcher import current_version
+    version = current_version()
+    if not version:
+        return _full_catalog()
+    return _versioned_catalog(version)

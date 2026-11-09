@@ -55,7 +55,7 @@ class IntentResolver(Protocol):
 class RuleBasedIntentResolver:
     """规则版。只做查询；写入类请求明确拒绝，避免「以为已经支持了」。"""
 
-    catalog: ModelCatalog = field(default_factory=catalog)
+    catalog: ModelCatalog = field(default_factory=lambda: catalog(online_only=True))
 
     def resolve(self, message: str) -> Intent:
         text = (message or "").strip()

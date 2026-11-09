@@ -206,8 +206,8 @@ class GenerationFlow:
                     on_event=emit)
                 result = await asyncio.to_thread(pipeline.run, model_path)
                 if result.ok:
-                    from syscraft.requirement.model_catalog import catalog
-                    catalog.cache_clear()  # 新实体要让业务模式的工具白名单看见
+                    from syscraft.requirement.model_catalog import reset_catalog_cache
+                    reset_catalog_cache()  # 新实体要让业务模式的工具白名单看见
                     passed = result.steps[-1].detail or "通过"
                     reply = f"生成完成：版本 {version} 已上线（自动验收 {passed}）。现在可以直接问我新系统里的数据了。"
                 elif result.error == "用户取消生成":

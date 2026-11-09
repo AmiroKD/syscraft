@@ -215,9 +215,12 @@ CREATE TABLE IF NOT EXISTS adm_audit (
 
 -- 12. adm_request_dedup 请求幂等去重
 --      Agent 超时重试时用同一个 requestId 再发一次，直接回放上次响应，避免重复插入。
+--      response_json 为 NULL 表示「占坑未完成」：请求已进业务链但响应还没落
+--      （并发同键/进程中断）——重试者收到 409 而不是重复执行。
 CREATE TABLE IF NOT EXISTS adm_request_dedup (
     request_id    VARCHAR(64) NOT NULL COMMENT '调用方生成的请求 id',
-    response_json JSON        NOT NULL COMMENT '首次执行的响应，重试时原样回放',
+    user_id       BIGINT      NULL COMMENT '首次请求的用户；回放只对同一用户生效',
+    response_json JSON        NULL COMMENT '首次执行的响应，重试时原样回放；NULL=占坑中',
     expires_at    DATETIME    NOT NULL COMMENT '过期时间；到期后由清理任务删除，可重新提交',
     created_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (request_id),

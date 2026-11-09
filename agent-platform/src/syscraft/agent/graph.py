@@ -90,7 +90,8 @@ class BusinessAgent:
         from syscraft.requirement.model_catalog import catalog as default_catalog
         self._client = client
         if cat is None:
-            self._catalog_provider = default_catalog
+            # online_only：Agent 模式的工具白名单只认在线版本的实体（r5 留存项修复）
+            self._catalog_provider = lambda: default_catalog(online_only=True)
         elif callable(cat):
             self._catalog_provider = cat  # 测试注入
         else:

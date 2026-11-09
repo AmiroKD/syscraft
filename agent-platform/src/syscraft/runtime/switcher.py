@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -21,6 +22,9 @@ from syscraft import config
 
 HEALTH_TIMEOUT_SECONDS = 90
 _jar_process: subprocess.Popen | None = None
+# 切换互斥（审查 r5 留存项）：switch 全程十几秒（停旧 15s 上限 + 健康等待 90s 上限），
+# 两个并发切换会在同一端口上互相 pkill/抢启动，产物进程当场打架——一把线程锁串行化
+_switch_lock = threading.Lock()
 
 
 class SwitchError(Exception):
@@ -44,7 +48,13 @@ def list_versions() -> list[dict]:
 
 
 def switch(version: str) -> dict:
-    """切换运行版本。成功返回 {version, pid}；任何失败抛 SwitchError。"""
+    """切换运行版本。成功返回 {version, pid}；任何失败抛 SwitchError。
+    线程安全：并发调用串行执行（FastAPI 的端点跑在线程池里，锁用 threading 的）。"""
+    with _switch_lock:
+        return _switch_locked(version)
+
+
+def _switch_locked(version: str) -> dict:
     global _jar_process
     from syscraft.runtime.pipeline import _healthy, _port_busy
 

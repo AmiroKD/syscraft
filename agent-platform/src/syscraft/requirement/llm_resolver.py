@@ -63,7 +63,7 @@ class LLMIntentResolver:
     def __init__(self, catalog: ModelCatalog | None = None,
                  fallback: Protocol | None = None,
                  llm_call: Callable[[list[dict]], str] | None = None):
-        self._catalog = catalog or default_catalog()
+        self._catalog = catalog or default_catalog(online_only=True)
         self._fallback = fallback
         self._llm_call = llm_call or self._http_call
 

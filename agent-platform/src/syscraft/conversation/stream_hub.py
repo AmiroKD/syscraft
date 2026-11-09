@@ -5,15 +5,17 @@
 
 为什么在内存：运行中的任务本来就无法跨进程存活，平台重启后
 「续传一次已死的运行」没有意义——回放日志只服务同一次运行内的断线重连。
-seq 由中枢统一分配，单调递增；日志截断到上限（防长流水线撑爆内存）。
-"""
+seq 由中枢统一分配，单调递增；日志每轮 begin() 时重建，轮内不截断
+（事件是小 dict，一轮最多几千个、几百 KB 量级，不值得用截断换内存——
+截断会在长流水线上凿出回放缺口，重连拿不到中间事件又无从补救）。
+done 条目不永久驻留：超上限时从最老的 done 驱起。"""
 
 from __future__ import annotations
 
 import asyncio
 from collections import deque
 
-MAX_EVENTS_PER_SESSION = 800
+MAX_TRACKED_SESSIONS = 100
 
 
 class StreamHub:
@@ -32,9 +34,21 @@ class StreamHub:
             return False
         self._runs[session_id] = {"status": "running",
                                   "seq": run["seq"] if run else 0,
-                                  "events": deque(maxlen=MAX_EVENTS_PER_SESSION),
+                                  "events": deque(),
                                   "error": None}
+        self._sweep()
         return True
+
+    def _sweep(self) -> None:
+        """done 条目回收（审查 r5 留存项）：done 的事件在下一次 begin 前还有
+        重连回放价值，但不能无限堆——总会话数超限时从最老的 done 驱起，
+        running 条目永远保留。"""
+        if len(self._runs) <= MAX_TRACKED_SESSIONS:
+            return
+        done_ids = [sid for sid, run in self._runs.items() if run["status"] != "running"]
+        overflow = len(self._runs) - MAX_TRACKED_SESSIONS
+        for sid in done_ids[:overflow]:
+            del self._runs[sid]
 
     def is_active(self, session_id: str) -> bool:
         return self.status(session_id) == "running"

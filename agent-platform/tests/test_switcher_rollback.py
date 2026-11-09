@@ -109,3 +109,32 @@ def test_switch_happy_path_registers_pid(isolated):
     isolated.setattr(switcher_module, "_start_and_wait", lambda version: 4321)
     result = switcher_module.switch("v7")
     assert result == {"version": "v7", "pid": 4321}
+
+
+def test_concurrent_switch_serialized(isolated, monkeypatch):
+    """并发切换必须串行（审查 r5 留存项）：两个 switch 同时跑会在同一端口
+    上互相 pkill/抢启动。用计数器验证不交错。"""
+    import threading
+    import time as _time
+
+    isolated.setattr(switcher_module, "_current_version", lambda: "v7")
+    inside = {"n": 0, "max": 0}
+    guard = threading.Lock()
+
+    def slow_start(version):
+        with guard:
+            inside["n"] += 1
+            inside["max"] = max(inside["max"], inside["n"])
+        _time.sleep(0.05)
+        with guard:
+            inside["n"] -= 1
+        return 1234
+
+    monkeypatch.setattr(switcher_module, "_start_and_wait", slow_start)
+    threads = [threading.Thread(target=switcher_module.switch, args=("v2",))
+               for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert inside["max"] == 1, f"切换出现并发交错：同时在途 {inside['max']} 个"

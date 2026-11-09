@@ -35,7 +35,7 @@ from syscraft.tools.spring_client import SpringClient, SpringError
 def _build_resolver():
     """配置了 LLM_API_KEY 就走模型解析（失败自动降级规则版），否则纯规则版。"""
     if config.LLM_API_KEY:
-        return LLMIntentResolver(catalog(), fallback=RuleBasedIntentResolver())
+        return LLMIntentResolver(catalog(online_only=True), fallback=RuleBasedIntentResolver())
     return RuleBasedIntentResolver()
 
 

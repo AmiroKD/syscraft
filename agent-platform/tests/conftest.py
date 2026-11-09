@@ -12,7 +12,17 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fresh_catalog_cache():
-    from syscraft.requirement.model_catalog import catalog
-    catalog.cache_clear()
+    from syscraft.requirement.model_catalog import reset_catalog_cache
+    reset_catalog_cache()
     yield
-    catalog.cache_clear()
+    reset_catalog_cache()
+
+
+@pytest.fixture(autouse=True)
+def _offline_artifact(monkeypatch):
+    """单元测试不依赖产物在线状态：catalog(online_only=True) 的版本探针
+    一律当「读不到」（退回全量目录）。否则带 db.env 跑测试时探针会拿到
+    真实在线版本，同一个用例在 v7 在线时红、离线时绿——环境决定结果。
+    要测版本过滤的用例自己 stub syscraft.runtime.switcher.current_version。"""
+    import syscraft.runtime.switcher as switcher
+    monkeypatch.setattr(switcher, "current_version", lambda: None)

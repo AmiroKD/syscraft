@@ -33,6 +33,9 @@ class AcceptanceRunner:
         self.client = httpx.Client(base_url=base_url, timeout=timeout)
         self._tokens: dict[str, str] = {}
         self.run_id = uuid.uuid4().hex[:6]
+        # 验收临时数据登记簿（审查 r5 留存项：中途失败无统一清理）：
+        # (entity, base, record_id, headers) → 删除成功后销账；回合结束兜底清扫
+        self._tracked: list[dict] = []
 
     # ------------------------------------------------------------------ 基础
 
@@ -70,8 +73,11 @@ class AcceptanceRunner:
 
     def run(self) -> dict:
         results = []
-        for case in self.spec.get("cases", []):
-            results.append(self._run_case(case))
+        try:
+            for case in self.spec.get("cases", []):
+                results.append(self._run_case(case))
+        finally:
+            cleanup = self._cleanup_leftovers()
 
         failed = [r for r in results if r["status"] == "FAIL"]
         summary = {
@@ -87,6 +93,7 @@ class AcceptanceRunner:
             "result": "PASS" if summary["blockFailed"] == 0 else "FAIL",
             "summary": summary,
             "cases": results,
+            "cleanup": cleanup,
         }
 
     def _run_case(self, case: dict) -> dict:
@@ -154,6 +161,7 @@ class AcceptanceRunner:
             if isinstance(sample.get(field), str):
                 sample[field] = f"{sample[field]}-{self.run_id}"
         record_id = self._post(f"{base}/insert", sample, headers)["data"]
+        self._track(entity, base, record_id, headers)
 
         ticket = self._post("/api/confirm/preview", {"entity": entity, "ids": [record_id]}, headers)
         token = ticket["data"]["token"]
@@ -162,6 +170,7 @@ class AcceptanceRunner:
                                  headers=headers)
         if first.status_code != 200:
             raise CaseFailure("首次核销失败", expected=200, actual=first.json())
+        self._untrack(entity, record_id)
 
         second = self.client.post(f"{base}/delete", json={"ids": [record_id], "confirmToken": token},
                                   headers=headers)
@@ -183,6 +192,7 @@ class AcceptanceRunner:
         record_id = inserted.get("data")
         if record_id is None:
             raise CaseFailure("新增未返回主键", expected="data=id", actual=inserted)
+        self._track(check["entity"], base, record_id, headers)
 
         rows = self._query_by_id(base, record_id, headers)
         if len(rows) != 1:
@@ -208,6 +218,7 @@ class AcceptanceRunner:
                              {"ids": [record_id], "confirmToken": ticket["data"]["token"]}, headers)
         if deleted.get("data") != 1:
             raise CaseFailure("删除影响行数不是 1", expected=1, actual=deleted)
+        self._untrack(check["entity"], record_id)
 
         if self._query_by_id(base, record_id, headers):
             raise CaseFailure("删除后仍能查到", expected=0, actual=1)
@@ -215,6 +226,36 @@ class AcceptanceRunner:
         return {"id": record_id, "updatedField": changed_field}
 
     # ------------------------------------------------------------------ 工具
+
+    def _track(self, entity: str, base: str, record_id, headers: dict) -> None:
+        self._tracked.append({"entity": entity, "base": base,
+                              "id": record_id, "headers": headers})
+
+    def _untrack(self, entity: str, record_id) -> None:
+        self._tracked = [t for t in self._tracked
+                         if not (t["entity"] == entity and t["id"] == record_id)]
+
+    def _cleanup_leftovers(self) -> dict:
+        """回冬结束兜底清扫：所有登记在册、还没被用例自己删掉的记录，
+        走预告+确认流程删掉。中途失败（断言不过/HTTP 异常/意外异常）
+        留下的半截数据都在这里收尾；清理本身失败只记进报告，不再抛。"""
+        removed, failed = [], []
+        for item in list(self._tracked):
+            try:
+                ticket = self._post("/api/confirm/preview",
+                                    {"entity": item["entity"], "ids": [item["id"]]},
+                                    item["headers"])
+                self._post(f"{item['base']}/delete",
+                           {"ids": [item["id"]],
+                            "confirmToken": ticket["data"]["token"]},
+                           item["headers"])
+                removed.append({"entity": item["entity"], "id": item["id"]})
+            except Exception as error:  # noqa: BLE001 清理失败不能掩埋主报告
+                failed.append({"entity": item["entity"], "id": item["id"],
+                               "error": str(error)})
+            finally:
+                self._untrack(item["entity"], item["id"])
+        return {"removed": removed, "failed": failed}
 
     def _post(self, path: str, payload: dict, headers: dict) -> dict:
         response = self.client.post(path, json=payload, headers=headers)

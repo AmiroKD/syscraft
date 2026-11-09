@@ -1,0 +1,13 @@
+[project]
+name = "syscraft"
+version = "0.1.0"
+description = "SysCraft（语构）平台侧：对话、解析、生成、运行时"
+requires-python = ">=3.12"
+
+# 依赖声明在 requirements.txt（只写意图），补丁版本由 requirements.lock 锁定。
+# 这里只放工具配置，避免两处各写一份依赖清单。
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

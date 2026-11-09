@@ -68,6 +68,31 @@ PYTHONPATH=src .venv/bin/python -m syscraft.runtime.acceptance \
 
 生成器拒绝覆盖已存在的版本目录：换 `model_version` 或先手工删除。
 
+## 对话链路（§5 第 5 步，最窄）
+
+```bash
+# 终端 A：产物侧（已编译好的 v1）
+cd agent-platform/workspace/versions/v1
+env -u SERVER__PORT java -jar target/syscraft-skeleton-0.1.0.jar --server.port=8080
+
+# 终端 B：平台侧
+cd agent-platform
+PYTHONPATH=src .venv/bin/python -m uvicorn syscraft.app:app --host 127.0.0.1 --port 8090
+
+# 登录拿令牌，再发一句话
+set -a; source ~/.adaptive/db.env; set +a
+TOKEN=$(curl -s -X POST localhost:8090/api/auth/login -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_INIT_PWD\"}" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["token"])')
+
+curl -s -X POST localhost:8090/api/chat -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"message":"查订单"}'
+```
+
+当前范围：意图解析是**规则版**（认实体、「字段 是 值」、条数），只支持查询；写入类请求会明确拒绝而不是静默当成查询。
+LLM 版实现同一个 `IntentResolver` 协议即可替换，编排层不动。
+
+
 ## 约定
 
 - 分支 `main`，一个任务一次 commit，message 写「做了什么 + 验收结果」

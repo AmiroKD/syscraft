@@ -163,7 +163,9 @@ public class {{ class_name }}Service {
             throw new BizException(ErrorCode.BAD_REQUEST, "请求体不能为空");
         }
         validate(entity);
+{% if computed_rules %}
         applyComputed(entity);
+{% endif %}
         mapper.insert(entity);
         return entity.getId();
     }
@@ -178,7 +180,9 @@ public class {{ class_name }}Service {
             throw new BizException(ErrorCode.NOT_FOUND, "记录不存在：" + entity.getId());
         }
         validate(entity);
+{% if computed_rules %}
         applyComputed(entity);
+{% endif %}
 {% if state_rule %}
         checkTransition(existing, entity);
 {% endif %}

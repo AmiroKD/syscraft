@@ -99,10 +99,23 @@ def prepare_field(field: dict) -> dict:
 
 
 def build_checks(entity: dict) -> dict:
-    """校验段与规则段的 Java 片段由固定句式拼出，模型只提供字段名与阈值。"""
+    """校验段与规则段的 Java 片段由固定句式拼出，模型只提供字段名与阈值。
+
+    规则里的字段名是**列名**（snake_case），实体字段同时带列名与属性名
+    （camelCase）——手写模型两者常相同掩盖了这里的查找 bug，LLM 抽取的模型
+    第一次分叉就炸（KeyError: borrow_quantity）。两种名字都认。"""
     fields = entity["_fields"]
     by_prop = {f["property"]: f for f in fields}
-    constrained = {c["field"] for c in entity.get("rules", {}).get("constraints", [])}
+    by_column = {f["column"]: f for f in fields}
+
+    def _resolve(name: str) -> dict | None:
+        return by_prop.get(name) or by_column.get(name)
+
+    constraint_rules = entity.get("rules", {}).get("constraints", [])
+    constrained = {
+        _resolve(c["field"]).get("property")
+        for c in constraint_rules if _resolve(c["field"]) is not None
+    }
 
     not_null_checks = []
     for f in fields:
@@ -115,8 +128,10 @@ def build_checks(entity: dict) -> dict:
         not_null_checks.append({"condition": condition, "message": f"{f['semantic']}不能为空"})
 
     constraints = []
-    for rule in entity.get("rules", {}).get("constraints", []):
-        f = by_prop[rule["field"]]
+    for rule in constraint_rules:
+        f = _resolve(rule["field"])
+        if f is None:
+            raise SystemExit(f"约束引用了不存在的字段 {rule['field']!r}")
         if f["java_type"] not in NUMERIC_JAVA:
             raise SystemExit(f"约束只支持数值字段（{rule['field']} 是 {f['java_type']}）")
         op = COMPARE_OPS.get(rule["op"])
@@ -132,9 +147,11 @@ def build_checks(entity: dict) -> dict:
 
     computed_rules = []
     for rule in entity.get("rules", {}).get("computed", []):
-        target = by_prop[rule["target"]]
-        left = by_prop[rule["left"]]
-        right = by_prop[rule["right"]]
+        target = _resolve(rule["target"])
+        left = _resolve(rule["left"])
+        right = _resolve(rule["right"])
+        if target is None or left is None or right is None:
+            raise SystemExit(f"计算规则 {rule} 引用了不存在的字段")
         method = ARITHMETIC.get(rule["op"])
         if method is None:
             raise SystemExit(f"不支持的计算运算符 {rule['op']}")
@@ -152,7 +169,9 @@ def build_checks(entity: dict) -> dict:
 
     state_rule = None
     for rule in entity.get("rules", {}).get("states", []):
-        f = by_prop[rule["field"]]
+        f = _resolve(rule["field"])
+        if f is None:
+            raise SystemExit(f"状态机规则引用了不存在的字段 {rule['field']!r}")
         state_rule = {
             "field": rule["field"],
             "getter": f["getter"],

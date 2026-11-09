@@ -1,0 +1,194 @@
+{
+  "model_version": "v4",
+  "entities": [
+    {
+      "entity": "book",
+      "class_name": "Book",
+      "display_name": "图书",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "title",
+          "property": "title",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "图书名称",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "author",
+          "property": "author",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "图书作者，多位作者以逗号分隔",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "publisher",
+          "property": "publisher",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "出版单位名称",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "stock_qty",
+          "property": "stockQty",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "当前可借库存册数",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "borrow_record",
+      "class_name": "BorrowRecord",
+      "display_name": "借阅记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "book_id",
+          "property": "bookId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "所借图书，关联 book.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "borrower",
+          "property": "borrower",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "借阅人姓名，暂以文本记录",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "borrow_qty",
+          "property": "borrowQty",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "本次借阅册数，必须为正整数",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "borrow_date",
+          "property": "borrowDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "借出发生日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "借出 / 已归还",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "book",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "borrow_record",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "借阅人不单独建读者实体，暂以文本字段记录；若后续需要借书证、联系方式等，可拆出 reader 实体。",
+    "出版社暂以文本字段记录，不做出版社档案管理。",
+    "借出时对 book.stock_qty 的扣减、归还时的回补属于跨表业务计算，系统不自动处理，由业务侧在借出/归还时手工维护库存。",
+    "库存数量与借阅数量均为整数；借阅数量必须大于 0，库存数量不得为负数。",
+    "新增借阅记录默认状态为「借出」，归还后变更为「已归还」；本期不建模逾期、续借、罚金。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # 产物侧地址。平台是唯一入口，浏览器不直连 Spring（《接口契约》1 节）
 SPRING_BASE_URL = os.getenv("SPRING_BASE_URL", "http://127.0.0.1:8080")
+# 产物端口单独给出生成流程用（停旧产物、健康探测都只认端口）
+SPRING_PORT = int(os.getenv("SPRING_PORT", "8080"))
 
 # 产物侧调用超时：生成物接口都是单表短查询，5 秒足够；超时说明产物卡住了
 SPRING_TIMEOUT_SECONDS = float(os.getenv("SPRING_TIMEOUT_SECONDS", "5"))

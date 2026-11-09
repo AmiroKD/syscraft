@@ -81,12 +81,25 @@ def build_system_prompt(cat: ModelCatalog, slots: dict) -> str:
 
 
 class BusinessAgent:
-    """一次对话请求 = 跑一遍图。实例持有共享依赖（client/catalog），可跨请求复用。"""
+    """一次对话请求 = 跑一遍图。实例持有共享依赖（client/catalog），可跨请求复用。
 
-    def __init__(self, client: SpringClient, cat: ModelCatalog):
+    catalog 用 provider 而不是实例：对话内生成新实体后 cache_clear()，
+    这里必须拿到新目录——握着启动时的旧引用会让新系统对本 Agent 隐身（实测踩过）。"""
+
+    def __init__(self, client: SpringClient, cat=None):
+        from syscraft.requirement.model_catalog import catalog as default_catalog
         self._client = client
-        self._catalog = cat
+        if cat is None:
+            self._catalog_provider = default_catalog
+        elif callable(cat):
+            self._catalog_provider = cat  # 测试注入
+        else:
+            self._catalog_provider = lambda: cat  # 兼容直接传实例（测试用）
         self._graph = self._build()
+
+    @property
+    def _catalog(self) -> ModelCatalog:
+        return self._catalog_provider()
 
     def _build(self):
         graph = StateGraph(AgentState)

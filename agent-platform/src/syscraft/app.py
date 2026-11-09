@@ -14,14 +14,16 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import FastAPI, Header, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, Header, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from syscraft import config
+from syscraft.agent.generate import GenerationFlow
 from syscraft.agent.graph import BusinessAgent
 from syscraft.conversation.chat import ChatService
 from syscraft.conversation.store import SessionNotFound, SessionStore
+from syscraft.conversation.stream_hub import StreamHub, generation_lock
 from syscraft.requirement.intent import RuleBasedIntentResolver
 from syscraft.requirement.llm_resolver import LLMIntentResolver
 from syscraft.requirement.model_catalog import catalog
@@ -39,8 +41,41 @@ app = FastAPI(title="SysCraft 平台", version="0.1.0")
 
 _client = SpringClient()
 _chat = ChatService(_client, _build_resolver())
-_agent = BusinessAgent(_client, catalog()) if config.LLM_API_KEY else None
+_agent = BusinessAgent(_client) if config.LLM_API_KEY else None
 _sessions = SessionStore()
+_hub = StreamHub()
+_generation = GenerationFlow(_client)
+
+
+class _IdentityCache:
+    """登录时缓存 token→用户。生成期间产物按设计停机，me() 不可用时的身份兑底。
+
+    只兑底「产物不可达」（503）这一种情况；401 等鉴权错误照常抛。
+    平台重启即空——运行也随进程死了，不存在跨重启的重连。"""
+
+    def __init__(self):
+        self._map: dict[str, dict] = {}
+
+    def remember(self, token: str, user: dict) -> None:
+        self._map[token] = user
+
+    def get(self, token: str) -> dict | None:
+        return self._map.get(token)
+
+
+_identities = _IdentityCache()
+
+
+async def _identity(token: str) -> dict | None:
+    """当前用户；产物停机时回退登录缓存，两者都没有则 None。"""
+    try:
+        user = await _client.me(token)
+        _identities.remember(token, user)
+        return user
+    except SpringError as error:
+        if error.status == 503:  # 产物停机（多半在生成中）：不能把重连拒之门外
+            return _identities.get(token)
+        raise
 
 
 class LoginRequest(BaseModel):
@@ -67,12 +102,19 @@ async def healthz() -> dict:
     return envelope({"status": "ok"})
 
 
+@app.get("/")
+async def index():
+    """最小前端（web/index.html）。设计是 SPA 单页，这里直接托管。"""
+    return FileResponse(config.PROJECT_ROOT / "web" / "index.html")
+
+
 @app.post("/api/auth/login")
 async def login(payload: LoginRequest) -> dict:
     try:
         data = await _client.login(payload.username, payload.password)
     except SpringError as error:
         return _error(error)
+    _identities.remember(data["token"], data["user"])
     return envelope(data)
 
 
@@ -81,11 +123,15 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
     token = _bearer(authorization)
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    if generation_lock.locked():
+        return JSONResponse(status_code=503, content=envelope(None, "系统正在生成中，请稍后再试", 503))
 
-    # ---- Agent 引擎（有 LLM）：跑图，一次返回最终结果 ----
+    # ---- Agent 引擎（有 LLM）：生成流优先，业务图接盘 ----
     if _agent is not None:
         try:
-            me = await _client.me(token)
+            me = await _identity(token)
+            if me is None:
+                return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
             session = (_sessions.open(payload.session_id, me["id"])
                        if payload.session_id else _sessions.create(me["id"], payload.message[:20]))
         except SpringError as error:
@@ -93,6 +139,11 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
         except SessionNotFound:
             return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
 
+        gen_result = await _generation.handle(payload.message, token, session,
+                                              emit=lambda event: _hub.emit(session.id, event))
+        if gen_result is not None:
+            return envelope({"reply": gen_result.get("reply"), "table": None,
+                             "session_id": session.id})
         final = await _agent.run(payload.message, token, session)
         return envelope({"reply": final.get("reply"), "table": final.get("table"),
                          "session_id": session.id})
@@ -113,17 +164,26 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(payload: ChatRequest, authorization: str | None = Header(default=None)):
-    """SSE 流式对话。事件形态见《智能体工具协议》3 节，type 与前端卡片一一对应。"""
+async def chat_stream(payload: ChatRequest, authorization: str | None = Header(default=None),
+                      after_seq: int = Query(default=0, ge=0)):
+    """SSE 流式对话（《技术栈》3.2 + 《会话与上下文策略》6.2）。
+
+    - after_seq=0：新消息。会话有任务在身时拒绝 409（前端输入框禁用的后端约束）；
+    - after_seq>0：断线重连。不重发请求——只补发缺失事件，继续跟到本轮结束；
+      运行已结束则回放全部事件后立即 done（设计 6.2「直接返回最终状态」）。
+    """
     token = _bearer(authorization)
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
     if _agent is None:
         return JSONResponse(status_code=503, content=envelope(None, "未配置模型，流式通道不可用", 503))
 
-    # 身份与会话在进入流之前解析完：错误以普通 JSON 返回，前端不用解析 SSE 里的错误
+    # 身份与会话在进入流之前解析完：错误以普通 JSON 返回，前端不用解析 SSE 里的错误。
+    # 注意身份用 _identity：生成期间产物停机，重连不能被 me() 的 502 拦在门外（实测踩过）
     try:
-        me = await _client.me(token)
+        me = await _identity(token)
+        if me is None:
+            return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
         session = (_sessions.open(payload.session_id, me["id"])
                    if payload.session_id else _sessions.create(me["id"], payload.message[:20]))
     except SpringError as error:
@@ -131,41 +191,66 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
     except SessionNotFound:
         return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
 
-    queue: asyncio.Queue[dict | None] = asyncio.Queue()
-    session_id = session.id
+    sid = session.id
+    reconnecting = after_seq > 0
 
-    async def generate():
-        seq = 0
+    if _hub.is_active(sid):
+        if not reconnecting:
+            return JSONResponse(status_code=409, content=envelope(None, "该会话有任务进行中，请等待完成", 409))
+    elif reconnecting:
+        # 运行已结束的重连：回放既有事件后立刻 done（follow 循环自然走完）
+        pass
+    elif generation_lock.locked():
+        return JSONResponse(status_code=503, content=envelope(None, "另一个会话正在生成系统，请稍后再试", 503))
+    elif not _hub.begin(sid):
+        return JSONResponse(status_code=409, content=envelope(None, "该会话有任务进行中", 409))
 
-        def emit(event: dict) -> None:
-            queue.put_nowait(event)
+    def emit(event: dict) -> None:
+        _hub.emit(sid, event)
 
-        task = asyncio.create_task(_agent.run(payload.message, token, session, on_event=emit))
-        # 循环纪律：任务没完就带超时等事件；任务完了先排干队列再退出——
-        # 否则最后几个事件会被 break 吞掉（asyncio 的经典竞态）
+    async def dispatch():
+        """一条消息的完整派发。生成流可能提前返回而流水线仍在跑——
+        follow 循环靠 gen_state 槽位判断还有没有事件会来。"""
+        try:
+            gen_result = await _generation.handle(payload.message, token, session, emit)
+            if gen_result is not None:
+                if gen_result.get("reply"):
+                    emit({"type": "text", "text": gen_result["reply"]})
+                return
+            await _agent.run(payload.message, token, session, on_event=emit)
+        except Exception as error:  # noqa: BLE001 任何异常都要变成流里的事件而不是悬空连接
+            emit({"type": "error", "message": f"处理失败：{error}"})
+
+    task = None if reconnecting else asyncio.create_task(dispatch())
+
+    async def follow():
+        last = after_seq
         while True:
-            if not task.done():
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=0.2)
-                except asyncio.TimeoutError:
-                    continue
-            else:
-                try:
-                    event = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-            seq += 1
-            yield f"data: {json.dumps({'seq': seq, **event}, ensure_ascii=False)}\n\n"
-        if task.exception() is not None:
-            seq += 1
-            yield f"data: {json.dumps({'seq': seq, 'type': 'error', 'message': str(task.exception())}, ensure_ascii=False)}\n\n"
-            final = None
-        else:
-            final = task.result()
-        seq += 1
-        yield f"data: {json.dumps({'seq': seq, 'type': 'done', 'sessionId': session_id, 'reply': final.get('reply') if final else None}, ensure_ascii=False)}\n\n"
+            events = _hub.replay(sid, last)
+            for event in events:
+                last = event["seq"]
+                yield event
+            dispatch_done = task is None or task.done()
+            gen_running = session.get_slot("gen_state") == "running"
+            if dispatch_done and not gen_running:
+                if events:
+                    continue  # 再排一轮，确认没有残余
+                break
+            if not events:
+                await asyncio.sleep(0.15)
 
-    return StreamingResponse(generate(), media_type="text/event-stream",
+        if task is not None and task.done() and task.exception() is not None:
+            yield {"type": "error", "message": str(task.exception())}
+        _hub.finish(sid)
+        seq = _hub.emit(sid, {"type": "done", "sessionId": sid})
+        final = {"type": "done", "sessionId": sid, "seq": seq}
+        yield final
+
+    async def sse():
+        async for event in follow():
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(sse(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

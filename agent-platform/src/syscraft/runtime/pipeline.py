@@ -44,18 +44,31 @@ class PipelineResult:
     ok: bool = False
     failed_step: str | None = None
     steps: list[StepResult] = field(default_factory=list)
+    # 步骤回调（对话式生成用来推 SSE）。挂在 result 上而不是 Pipeline 上——
+    # record() 是 result 的方法，挂在 Pipeline 上会 AttributeError（实测踩过）
+    notify: object | None = field(default=None, repr=False)
+    # 顶层异常文本。failed_step 只指向最后一个「成功记录」的步骤，
+    # 真实失败原因在这里——对话回复必须用它，否则用户看到的是空错误
+    error: str = ""
 
     def record(self, name: str, ok: bool, detail: str = "") -> None:
         self.steps.append(StepResult(name, ok, detail))
         mark = "PASS" if ok else "FAIL"
         print(f"[{mark}] {name}" + (f"  {detail[:160]}" if detail else ""))
+        if self.notify:
+            self.notify(name, ok, detail)
 
 
 class Pipeline:
-    def __init__(self, project_root: Path | None = None, port: int = 8080):
+    def __init__(self, project_root: Path | None = None, port: int = 8080,
+                 *, notify=None, keep_running: bool = False):
+        """notify(name, ok, detail)：每步结束回调（对话式生成用它推 SSE 阶段事件）。
+        keep_running：验收成功后不关产物——对话式生成的终态是新版本直接上线。"""
         self.root = (project_root or config.PROJECT_ROOT).resolve()
         self.port = port
         self.process: subprocess.Popen | None = None
+        self._notify = notify
+        self._keep_running = keep_running
 
     # ------------------------------------------------------------------ ②生成
 
@@ -213,7 +226,7 @@ class Pipeline:
     def run(self, model_path: Path) -> PipelineResult:
         model = json.loads(model_path.read_text(encoding="utf-8"))
         version = model["model_version"]
-        result = PipelineResult(version=version)
+        result = PipelineResult(version=version, notify=self._notify)
         print(f"=== SysCraft 流水线：{model_path.name} → v{version[1:] if version.startswith('v') else version} ===")
 
         try:
@@ -229,10 +242,13 @@ class Pipeline:
         except Exception as error:
             result.ok = False
             result.failed_step = result.steps[-1].name if result.steps else "?"
+            result.error = str(error)
             summary = {"version": version, "ok": False, "failedStep": result.failed_step,
                        "steps": [s.__dict__ for s in result.steps], "error": str(error)}
         finally:
-            self.stop()
+            # 对话式生成成功后不关产物：新版本直接上线承接业务对话（运行时 5 节）
+            if not (self._keep_running and result.ok):
+                self.stop()
 
         report_path = self.root / "workspace/logs" / f"pipeline-{version}.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -263,14 +279,6 @@ def _maven_build(version_dir: Path) -> tuple[bool, str]:
     process = subprocess.run([str(maven), "-B", "-q", "package", "-DskipTests"],
                              cwd=version_dir, capture_output=True, text=True, timeout=600)
     return process.returncode == 0, (process.stdout + process.stderr)[-4000:]
-
-
-def _port_busy(port: int) -> bool:
-    """健康接口没起来不代表端口空着——占用者可能是个不响应 /actuator 的进程。"""
-    import socket
-    with socket.socket() as sock:
-        sock.settimeout(1)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def _port_busy(port: int) -> bool:

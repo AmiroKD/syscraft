@@ -327,6 +327,17 @@ def build_acceptance(model: dict, written: dict[str, list[str]]) -> dict:
 
     first_base = f"/api/biz/{model['entities'][0]['entity']}"
     cases.append({
+        "id": "confirm-reuse", "category": "confirm", "level": "block",
+        "title": "同一确认令牌不能核销两次",
+        "suspects": ["src/main/java/com/generated/platform/confirm/ConfirmService.java"],
+        "check": {"type": "confirmReuse", "base": first_base, "entity": model["entities"][0]["entity"],
+                  "account": "__acc_admin__",
+                  "sample": {f["column"]: sample_value(f) for f in model["entities"][0]["fields"] if not f.get("primary_key")},
+                  "unique_fields": [f["column"] for f in model["entities"][0]["fields"]
+                                    if f.get("unique") and not f.get("primary_key")]},
+    })
+
+    cases.append({
         "id": "auth-401", "category": "permission", "level": "block", "title": "无令牌访问返回 401",
         "suspects": ["src/main/java/com/generated/platform/security/SaTokenConfig.java"],
         "check": {"type": "status", "path": f"{first_base}/query", "expect": 401, "auth": "none"},

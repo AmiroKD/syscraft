@@ -90,7 +90,10 @@ class AcceptanceRunner:
     def _run_case(self, case: dict) -> dict:
         base = {"id": case["id"], "title": case["title"], "level": case.get("level", "block")}
         try:
-            detail = getattr(self, "_check_" + case["check"]["type"])(case["check"])
+            # 驼峰类型名 → 蛇形方法名：confirmReuse -> _check_confirm_reuse
+            check_type = "".join("_" + part.lower() if part.isupper() else part
+                                 for part in case["check"]["type"]).lstrip("_")
+            detail = getattr(self, "_check_" + check_type)(case["check"])
             return {**base, "status": "PASS", "detail": detail}
         except CaseFailure as failure:
             return {**base, "status": "FAIL", "message": str(failure),
@@ -134,6 +137,30 @@ class AcceptanceRunner:
             )
         return {"status": response.status_code, "body": response.json()}
 
+    def _check_confirm_reuse(self, check: dict) -> dict:
+        base, entity, auth = check["base"], check["entity"], check.get("account", "__acc_admin__")
+        headers = self.headers(auth)
+
+        sample = dict(check["sample"])
+        for field in check.get("unique_fields", []):
+            if isinstance(sample.get(field), str):
+                sample[field] = f"{sample[field]}-{self.run_id}"
+        record_id = self._post(f"{base}/insert", sample, headers)["data"]
+
+        ticket = self._post("/api/confirm/preview", {"entity": entity, "ids": [record_id]}, headers)
+        token = ticket["data"]["token"]
+
+        first = self.client.post(f"{base}/delete", json={"ids": [record_id], "confirmToken": token},
+                                 headers=headers)
+        if first.status_code != 200:
+            raise CaseFailure("首次核销失败", expected=200, actual=first.json())
+
+        second = self.client.post(f"{base}/delete", json={"ids": [record_id], "confirmToken": token},
+                                  headers=headers)
+        if second.status_code != 409:
+            raise CaseFailure("同一令牌第二次核销未被拒绝", expected=409, actual=second.json())
+        return {"firstStatus": first.status_code, "secondStatus": second.status_code}
+
     def _check_crud(self, check: dict) -> dict:
         base, auth = check["base"], check.get("account", "__acc_admin__")
         headers = self.headers(auth)
@@ -164,7 +191,13 @@ class AcceptanceRunner:
             if rows[0].get(changed_field) != updated[changed_field]:
                 raise CaseFailure(f"更新未生效：{changed_field}", expected=updated[changed_field], actual=rows[0].get(changed_field))
 
-        deleted = self._post(f"{base}/delete", {"ids": [record_id]}, headers)
+        # 删除走确认流程：预告（拿令牌与影响行数）→ 携令牌执行，与 Agent 的真实调用一致
+        ticket = self._post("/api/confirm/preview",
+                            {"entity": check["entity"], "ids": [record_id]}, headers)
+        if ticket["data"]["impactRows"] != 1:
+            raise CaseFailure("预告的影响行数不是 1", expected=1, actual=ticket["data"])
+        deleted = self._post(f"{base}/delete",
+                             {"ids": [record_id], "confirmToken": ticket["data"]["token"]}, headers)
         if deleted.get("data") != 1:
             raise CaseFailure("删除影响行数不是 1", expected=1, actual=deleted)
 

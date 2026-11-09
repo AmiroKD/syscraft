@@ -7,6 +7,7 @@ import com.generated.generated.dto.{{ class_name }}Query;
 import com.generated.generated.dto.{{ class_name }}VO;
 import com.generated.generated.entity.{{ class_name }};
 import com.generated.generated.mapper.{{ class_name }}Mapper;
+import com.generated.platform.audit.AuditService;
 import com.generated.platform.common.AggregateRequest;
 import com.generated.platform.common.BizException;
 import com.generated.platform.common.Cond;
@@ -17,6 +18,8 @@ import com.generated.platform.common.Metric;
 import com.generated.platform.common.OrderBy;
 import com.generated.platform.common.PageResult;
 import com.generated.platform.common.QueryOps;
+import com.generated.platform.confirm.ConfirmExecutorRegistry;
+import com.generated.platform.confirm.ConfirmService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 {% for imp in imports %}
@@ -28,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * {{ display_name }} 业务逻辑。结构固定为三段：<b>校验 → 规则 → 落库</b>。
@@ -56,9 +60,23 @@ public class {{ class_name }}Service {
 {% endif %}
 
     private final {{ class_name }}Mapper mapper;
+    private final ConfirmService confirmService;
+    private final AuditService auditService;
 
-    public {{ class_name }}Service({{ class_name }}Mapper mapper) {
+    public {{ class_name }}Service({{ class_name }}Mapper mapper, ConfirmService confirmService,
+                                   ConfirmExecutorRegistry confirmExecutorRegistry, AuditService auditService) {
         this.mapper = mapper;
+        this.confirmService = confirmService;
+        this.auditService = auditService;
+        // 注册影响行数计算器：确认预告据此算「这次会删多少条」，不用为每个实体手写预告逻辑
+        confirmExecutorRegistry.register("{{ entity }}", ids -> {
+            if (ids == null || ids.isEmpty()) {
+                return 0;
+            }
+            Long count = mapper.selectCount(
+                    Wrappers.<{{ class_name }}>lambdaQuery().in({{ class_name }}::getId, ids));
+            return count == null ? 0 : count.intValue();
+        });
     }
 
     // ------------------------------------------------------------------ 查询
@@ -167,12 +185,36 @@ public class {{ class_name }}Service {
         mapper.updateById(entity);
     }
 
+    /**
+     * 删除是高危操作：必须先拿预告令牌（权限 4.7）。流程固定为
+     * 核销令牌（抢占，防并发重复提交）→ 审计 INTENT → 删除 → 审计回填 → 令牌 CONSUMED；
+     * 业务失败则审计记 FAILED、令牌回退 ISSUED 可重试。
+     */
     @Transactional
     public int delete(IdsRequest req) {
         if (req == null || req.ids() == null || req.ids().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "ids 不能为空");
         }
-        return mapper.deleteByIds(req.ids());
+        List<Long> ids = req.ids().stream().filter(Objects::nonNull).distinct().sorted().toList();
+        if (ids.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "ids 不能为空");
+        }
+        String canonical = ids.stream().map(String::valueOf).collect(Collectors.joining(","));
+        String tokenHash = confirmService.consume(req.confirmToken(), "DELETE", "{{ entity }}", canonical);
+
+        long auditId = auditService.begin("删除{{ display_name }}", "{{ entity }}", canonical);
+        try {
+            int rows = mapper.deleteByIds(ids);
+            auditService.success(auditId, rows, "{\"ids\":[" + canonical + "]}");
+            confirmService.markConsumed(tokenHash);
+            return rows;
+        } catch (RuntimeException e) {
+            String detail = "{\"ids\":[" + canonical + "],\"error\":\""
+                    + String.valueOf(e.getMessage()).replace("\"", "'") + "\"}";
+            auditService.failed(auditId, detail);
+            confirmService.release(tokenHash);
+            throw e;
+        }
     }
 
     // ------------------------------------------------------- 校验段（模板固定句式）

@@ -69,6 +69,33 @@
       }
     },
     {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/trade_order",
+        "entity": "trade_order",
+        "account": "__acc_admin__",
+        "sample": {
+          "order_no": "TorderNo",
+          "customer": "Tcustomer",
+          "qty": 2,
+          "price": 100,
+          "amount": null,
+          "status": "CREATED",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": [
+          "order_no"
+        ]
+      }
+    },
+    {
       "id": "auth-401",
       "category": "permission",
       "level": "block",

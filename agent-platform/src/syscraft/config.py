@@ -18,3 +18,11 @@ SPRING_TIMEOUT_SECONDS = float(os.getenv("SPRING_TIMEOUT_SECONDS", "5"))
 PLATFORM_PORT = int(os.getenv("PLATFORM_PORT", "8090"))
 
 MODELS_DIR = PROJECT_ROOT / "models"
+
+# ---- LLM 接入（来源 db.env，与数据库凭证同一文件、同一权限）----
+# 没配 LLM_API_KEY 时，对话解析退回规则版 IntentResolver
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_MODEL = os.getenv("LLM_MODEL", "")
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))

@@ -10,14 +10,25 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from syscraft import config
 from syscraft.conversation.chat import ChatService
 from syscraft.requirement.intent import RuleBasedIntentResolver
+from syscraft.requirement.llm_resolver import LLMIntentResolver
+from syscraft.requirement.model_catalog import catalog
 from syscraft.tools.spring_client import SpringClient, SpringError
+
+
+def _build_resolver():
+    """配置了 LLM_API_KEY 就走模型解析（失败自动降级规则版），否则纯规则版。"""
+    if config.LLM_API_KEY:
+        return LLMIntentResolver(catalog(), fallback=RuleBasedIntentResolver())
+    return RuleBasedIntentResolver()
+
 
 app = FastAPI(title="SysCraft 平台", version="0.1.0")
 
 _client = SpringClient()
-_chat = ChatService(_client, RuleBasedIntentResolver())
+_chat = ChatService(_client, _build_resolver())
 
 
 class LoginRequest(BaseModel):

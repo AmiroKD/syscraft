@@ -36,11 +36,16 @@ class EntityInfo:
         return None
 
     def match_field(self, text: str) -> FieldInfo | None:
-        """按中文语义或列名在自然语言里找字段。用于解析「状态是已支付」这类条件。"""
+        """按中文语义或列名在自然语言里找字段。用于解析「状态是已支付」这类条件。
+
+        中文语义用子串（「订单号是SO-1」里切出来的就是「订单号」）；
+        列名必须<b>整词相等</b>——子串匹配会让 user_id 误命中 id 列，这是实测踩过的坑。
+        """
         for field in self.fields:
             if field.semantic and field.semantic in text:
                 return field
-            if field.column in text:
+        for field in self.fields:
+            if field.column == text.strip():
                 return field
         return None
 

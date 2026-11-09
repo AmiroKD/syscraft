@@ -43,6 +43,8 @@ class Intent:
     order_by: tuple[tuple[str, str], ...] = ()
     page: int = 1
     size: int = 20
+    # 解析来源：rules=规则版 / llm=模型。排障时能区分「这句话是谁理解的」
+    source: str = "rules"
 
 
 class IntentResolver(Protocol):

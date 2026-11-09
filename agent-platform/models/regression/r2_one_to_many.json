@@ -1,0 +1,40 @@
+{
+  "model_version": "r2",
+  "requirement": "回归模型二：一对多。客户管理（名称、联系方式）与订单管理（单号、金额），每张订单归属一个客户。",
+  "entities": [
+    {
+      "entity": "reg_customer",
+      "class_name": "RegCustomer",
+      "display_name": "客户",
+      "owner_field": null,
+      "fields": [
+        { "column": "id", "property": "id", "type": "BIGINT", "primary_key": true, "nullable": false, "unique": true, "semantic": "主键", "visibility": "PLAIN", "sensitive": false },
+        { "column": "name", "property": "name", "type": "VARCHAR", "length": 64, "primary_key": false, "nullable": false, "unique": false, "semantic": "客户名称", "visibility": "PLAIN", "sensitive": false },
+        { "column": "phone", "property": "phone", "type": "VARCHAR", "length": 20, "primary_key": false, "nullable": true, "unique": false, "semantic": "联系电话", "visibility": "MASK", "sensitive": false },
+        { "column": "created_at", "property": "createdAt", "type": "DATETIME", "primary_key": false, "nullable": false, "unique": false, "semantic": "创建时间", "visibility": "PLAIN", "sensitive": false }
+      ],
+      "rules": { "computed": [], "constraints": [], "states": [] }
+    },
+    {
+      "entity": "reg_order",
+      "class_name": "RegOrder",
+      "display_name": "订单",
+      "owner_field": null,
+      "fields": [
+        { "column": "id", "property": "id", "type": "BIGINT", "primary_key": true, "nullable": false, "unique": true, "semantic": "主键", "visibility": "PLAIN", "sensitive": false },
+        { "column": "order_no", "property": "orderNo", "type": "VARCHAR", "length": 32, "primary_key": false, "nullable": false, "unique": true, "semantic": "订单号", "visibility": "PLAIN", "sensitive": false },
+        { "column": "customer_id", "property": "customerId", "type": "BIGINT", "primary_key": false, "nullable": false, "unique": false, "semantic": "所属客户", "visibility": "PLAIN", "sensitive": false },
+        { "column": "amount", "property": "amount", "type": "DECIMAL", "precision": 12, "scale": 2, "primary_key": false, "nullable": false, "unique": false, "semantic": "金额", "visibility": "PLAIN", "sensitive": false },
+        { "column": "created_at", "property": "createdAt", "type": "DATETIME", "primary_key": false, "nullable": false, "unique": false, "semantic": "创建时间", "visibility": "PLAIN", "sensitive": false }
+      ],
+      "rules": { "computed": [], "constraints": [], "states": [] }
+    }
+  ],
+  "relations": [
+    { "from": "reg_order.customer_id", "to": "reg_customer.id", "type": "MANY_TO_ONE" }
+  ],
+  "grants": [
+    { "role": "USER", "entity": "reg_customer", "access": "READ" },
+    { "role": "USER", "entity": "reg_order", "access": "READ" }
+  ]
+}

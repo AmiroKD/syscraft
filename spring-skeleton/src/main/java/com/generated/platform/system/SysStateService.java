@@ -64,6 +64,20 @@ public class SysStateService {
         stateMapper.updateById(state);
     }
 
+    /**
+     * 版本切换的状态登记（仅超管）：把 adm_state.current_version 指到新运行的版本。
+     * 真正的启停由平台侧 switcher 做——Spring 管状态，平台管进程（运行时 5 节）。
+     * 目标版本的合法性（jar 是否存在）由平台侧校验，这里只管把状态写对。
+     */
+    public void setCurrentVersion(String version) {
+        if (version == null || version.isBlank()) {
+            throw new IllegalArgumentException("version 不能为空");
+        }
+        StateEntity state = requireState();
+        state.setCurrentVersion(version.trim());
+        stateMapper.updateById(state);
+    }
+
     public Readiness readiness() {
         String db = "ok";
         try {

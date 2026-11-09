@@ -26,7 +26,11 @@ public class PermVersionGuard {
     }
 
     public void check() {
-        long userId = StpUtil.getLoginIdAsLong();
+        check(StpUtil.getLoginIdAsLong());
+    }
+
+    /** 供回放路径复用：回放不经认证拦截器，身份与版本在这里补比 */
+    public void check(long userId) {
         Integer tokenVersion = tokenService.currentPermVersion();
         int currentVersion = permVersionService.current(userId);
         if (tokenVersion == null || tokenVersion != currentVersion) {

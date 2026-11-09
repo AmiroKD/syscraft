@@ -1,0 +1,36 @@
+{
+  "model_version": "r3",
+  "requirement": "回归模型三：三种规则混合。缴费单：金额 = 数量 × 单价（计算），数量必须大于 0（约束），状态按 待缴→已缴→已退 流转（状态机）。",
+  "entities": [
+    {
+      "entity": "reg_payment",
+      "class_name": "RegPayment",
+      "display_name": "缴费单",
+      "owner_field": null,
+      "fields": [
+        { "column": "id", "property": "id", "type": "BIGINT", "primary_key": true, "nullable": false, "unique": true, "semantic": "主键", "visibility": "PLAIN", "sensitive": false },
+        { "column": "bill_no", "property": "billNo", "type": "VARCHAR", "length": 32, "primary_key": false, "nullable": false, "unique": true, "semantic": "单号", "visibility": "PLAIN", "sensitive": false },
+        { "column": "payer", "property": "payer", "type": "VARCHAR", "length": 64, "primary_key": false, "nullable": false, "unique": false, "semantic": "缴费人", "visibility": "PLAIN", "sensitive": false },
+        { "column": "qty", "property": "qty", "type": "INT", "primary_key": false, "nullable": false, "unique": false, "semantic": "数量", "visibility": "PLAIN", "sensitive": false },
+        { "column": "price", "property": "price", "type": "DECIMAL", "precision": 12, "scale": 2, "primary_key": false, "nullable": false, "unique": false, "semantic": "单价", "visibility": "PLAIN", "sensitive": false },
+        { "column": "amount", "property": "amount", "type": "DECIMAL", "precision": 12, "scale": 2, "primary_key": false, "nullable": true, "unique": false, "semantic": "金额", "visibility": "PLAIN", "sensitive": false },
+        { "column": "status", "property": "status", "type": "VARCHAR", "length": 16, "primary_key": false, "nullable": false, "unique": false, "semantic": "状态", "visibility": "PLAIN", "sensitive": false, "sample": "PENDING" },
+        { "column": "created_at", "property": "createdAt", "type": "DATETIME", "primary_key": false, "nullable": false, "unique": false, "semantic": "创建时间", "visibility": "PLAIN", "sensitive": false }
+      ],
+      "rules": {
+        "computed": [
+          { "target": "amount", "op": "MULTIPLY", "left": "qty", "right": "price" }
+        ],
+        "constraints": [
+          { "field": "qty", "op": "GT", "value": 0, "message": "数量必须大于 0" }
+        ],
+        "states": [
+          { "field": "status", "flow": ["PENDING", "PAID", "REFUNDED"] }
+        ]
+      }
+    }
+  ],
+  "grants": [
+    { "role": "USER", "entity": "reg_payment", "access": "READ" }
+  ]
+}

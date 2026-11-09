@@ -80,6 +80,17 @@ public class ModelConfigService {
         log.info("模型接入配置已更新：{} {} {}", config.getProvider(), config.getBaseUrl(), config.getModel());
     }
 
+    /** 明文凭据（对契约的明示扩展）：仅超管可经 CredentialController 读取，供平台解析器接入 */
+    public record Credential(String provider, String baseUrl, String model, String apiKey) {
+    }
+
+    public Credential credential() {
+        ModelConfigEntity config = requireConfig();
+        String key = secretBox.decrypt(config.getApiKeyEnc());
+        return new Credential(config.getProvider(), config.getBaseUrl(), config.getModel(),
+                key == null || key.isBlank() ? null : key);
+    }
+
     /** 用已保存的配置发一次最小请求。任何失败都返回 ok=false + 人话原因，不抛 500 */
     public TestResult test() {
         ModelConfigEntity config = requireConfig();

@@ -27,6 +27,7 @@ from syscraft.conversation.stream_hub import StreamHub, generation_lock
 from syscraft.requirement.intent import RuleBasedIntentResolver
 from syscraft.requirement.llm_resolver import LLMIntentResolver
 from syscraft.requirement.model_catalog import catalog
+from syscraft.runtime import switcher as version_switcher
 from syscraft.tools.spring_client import SpringClient, SpringError
 
 
@@ -73,7 +74,8 @@ async def _identity(token: str) -> dict | None:
         _identities.remember(token, user)
         return user
     except SpringError as error:
-        if error.status == 503:  # 产物停机（多半在生成中）：不能把重连拒之门外
+        # 产物停机有两种表现：连接拒绝（503）或沙箱/网关代理的 502——都算「不在线」
+        if error.status in (502, 503):
             return _identities.get(token)
         raise
 
@@ -91,6 +93,10 @@ class ChatRequest(BaseModel):
 
 class RenameRequest(BaseModel):
     title: str = Field(min_length=1, max_length=64)
+
+
+class SwitchRequest(BaseModel):
+    version: str = Field(min_length=1, max_length=24)
 
 
 def envelope(data=None, msg: str = "ok", code: int = 0) -> dict:
@@ -316,6 +322,44 @@ async def delete_session(session_id: str, authorization: str | None = Header(def
     except SessionNotFound:
         return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
     return envelope({"deleted": session_id})
+
+
+# ---- 版本切换与回滚（运行时 5 节；仅超管；Spring 管状态，平台管进程）----
+
+@app.get("/api/runtime/versions")
+async def runtime_versions(authorization: str | None = Header(default=None)):
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if me is None or me.get("roleCode") != "SUPER_ADMIN":
+        return JSONResponse(status_code=403, content=envelope(None, "仅超管可查看版本清单", 403))
+    return envelope(version_switcher.list_versions())
+
+
+@app.post("/api/runtime/switch")
+async def runtime_switch(payload: SwitchRequest, authorization: str | None = Header(default=None)):
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    if generation_lock.locked():
+        return JSONResponse(status_code=503, content=envelope(None, "系统正在生成中，不能切换版本", 503))
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if me is None or me.get("roleCode") != "SUPER_ADMIN":
+        return JSONResponse(status_code=403, content=envelope(None, "仅超管可切换版本", 403))
+
+    import asyncio as _asyncio
+    try:
+        result = await _asyncio.to_thread(version_switcher.switch, payload.version)
+    except version_switcher.SwitchError as error:
+        return JSONResponse(status_code=409, content=envelope(None, str(error), 409))
+    return envelope(result)
 
 
 def _bearer(header: str | None) -> str | None:

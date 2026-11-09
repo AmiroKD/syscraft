@@ -3,6 +3,9 @@ package com.generated.platform.security;
 import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.jwt.StpLogicJwtForStateless;
 import cn.dev33.satoken.stp.StpLogic;
+import com.generated.platform.admin.mapper.RequestDedupMapper;
+import com.generated.platform.common.DedupFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -15,9 +18,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *   <li>SaInterceptor：注解鉴权（@SaCheckPermission，后跑）。</li>
  * </ol>
  *
- * <p>这里只做「有没有登录 / 令牌是否被作废」；「能不能调这个接口」由每个方法上的
- * {@code @SaCheckPermission("biz:{entity}:{op}")} 决定（权限 5.1），
- * 「能碰哪条记录、哪个字段」由 DataScope 切面决定。三者各管一段。</p>
+ * <p>写端点的幂等回放是 {@link DedupFilter}（Filter 而非拦截器：拦截器包装不了
+ * 响应体，实测踩过），注册见下方 dedupFilter；回放前的身份与版本检查在
+ * filter 内部自带，回放不给未认证请求套历史响应的机会。</p>
+ *
+ * <p>「能不能调这个接口」由每个方法上的
+ * {@code @SaCheckPermission("biz:{entity}:{op}")} 决定（权限 5.1）。</p>
  */
 @Configuration
 public class SaTokenConfig implements WebMvcConfigurer {
@@ -48,5 +54,15 @@ public class SaTokenConfig implements WebMvcConfigurer {
         registry.addInterceptor(new SaInterceptor())
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/api/auth/login");
+    }
+
+    @Bean
+    public FilterRegistrationBean<DedupFilter> dedupFilter(RequestDedupMapper dedupMapper,
+                                                           PermVersionGuard guard) {
+        FilterRegistrationBean<DedupFilter> registration =
+                new FilterRegistrationBean<>(new DedupFilter(dedupMapper, guard));
+        registration.addUrlPatterns("/api/biz/*");
+        registration.setOrder(50);
+        return registration;
     }
 }

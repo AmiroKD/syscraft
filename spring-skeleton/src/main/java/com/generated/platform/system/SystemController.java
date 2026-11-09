@@ -2,6 +2,7 @@ package com.generated.platform.system;
 
 import com.generated.platform.admin.OperatorContext;
 import com.generated.platform.common.ApiResponse;
+import com.generated.platform.common.ErrorCode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -21,9 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/system")
 public class SystemController {
-
-    public record InitializedRequest(@NotNull Boolean initialized) {
-    }
 
     public record ModelRequest(@NotBlank String provider, @NotBlank String baseUrl,
                                @NotBlank String model, String apiKey) {
@@ -45,10 +43,22 @@ public class SystemController {
         return ApiResponse.ok(sysStateService.state());
     }
 
+    /** initialized 与 currentVersion 至少给一个；都为空是调用方的 bug */
+    public record StateRequest(Boolean initialized, String currentVersion) {
+    }
+
     @PutMapping("/state")
-    public ApiResponse<Void> updateState(@Valid @RequestBody InitializedRequest request) {
+    public ApiResponse<Void> updateState(@RequestBody StateRequest request) {
         operatorContext.requireSuperAdmin();
-        sysStateService.setInitialized(request.initialized());
+        if (request.currentVersion() != null && !request.currentVersion().isBlank()) {
+            sysStateService.setCurrentVersion(request.currentVersion());
+        }
+        if (request.initialized() != null) {
+            sysStateService.setInitialized(request.initialized());
+        }
+        if (request.initialized() == null && request.currentVersion() == null) {
+            return ApiResponse.fail(ErrorCode.BAD_REQUEST, "initialized 与 currentVersion 至少给一个");
+        }
         return ApiResponse.ok();
     }
 

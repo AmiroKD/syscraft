@@ -18,7 +18,9 @@ import javax.sql.DataSource;
  * <p>权限库物理名是 adm 不是 sys：MySQL 自带 sys 库，无法占用。</p>
  */
 @Configuration
-@MapperScan(basePackages = "com.generated.platform.admin.mapper", sqlSessionFactoryRef = "admSqlSessionFactory")
+@MapperScan(basePackages = {"com.generated.platform.admin.mapper", "com.generated.platform.meta"},
+            sqlSessionFactoryRef = "admSqlSessionFactory")
+            // meta 里是能力视图的只读查询（GrantViewMapper），同走 adm 库
 public class AdmDataSourceConfig {
 
     @Primary

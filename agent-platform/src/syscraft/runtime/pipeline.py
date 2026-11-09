@@ -72,6 +72,20 @@ class Pipeline:
 
     # ------------------------------------------------------------------ ②生成
 
+    def step_stop_stale(self, result: PipelineResult) -> None:
+        """停掉残留的旧产物（CLI 模式与对话式生成对齐，一条命令到底）。
+        只匹配自家 jar；端口本就空闲则零开销。"""
+        if not (_port_busy(self.port) or _healthy(self.port)):
+            return
+        subprocess.run(["pkill", "-f", "syscraft-skeleton-0.1.0.jar"], capture_output=True)
+        deadline = time.time() + 15
+        while (_port_busy(self.port) or _healthy(self.port)) and time.time() < deadline:
+            time.sleep(0.5)
+        if _port_busy(self.port):
+            result.record("① 停旧产物", False, "端口仍被占用")
+            raise RuntimeError("旧产物停止失败")
+        result.record("① 停旧产物", True)
+
     def step_generate(self, model_path: Path, result: PipelineResult) -> Path:
         info = generate(model_path, self.root)
         result.record("② 生成", True, f"版本 {info['version']}，{sum(len(v) for v in info['files'].values())} 个文件")
@@ -116,24 +130,50 @@ class Pipeline:
             connection.close()
         result.record("③ 建表（biz）", True, f"{len(scripts)} 个脚本，{applied} 条语句")
 
-    # ------------------------------------------- 默认授权（桥接，见模块注释）
+    # --------------------------------------------------- 模型快照（明示扩展）
 
-    def step_apply_grants(self, version: str, result: PipelineResult) -> None:
-        grants = sorted((self.root / "workspace/scripts/grants").glob(f"{version}_*.sql"))
-        for script in grants:
-            # 走 stdin 而不是 mysql 的 source 命令：source 对文件里的注释行处理有坑（实测 1064）
-            with script.open("rb") as fh:
-                process = subprocess.run(
-                    ["mysql", "-h127.0.0.1", "-P3306",
-                     "-u", os.environ.get("APP_USER", ""), f"-p{os.environ.get('APP_PWD', '')}", "adm"],
-                    stdin=fh, capture_output=True, text=True, timeout=30)
-            if process.returncode != 0:
-                # 口令打错之类的环境问题，把 mysql 的报错带出来（剥掉密码回显行）
-                detail = "\n".join(line for line in process.stderr.splitlines()
-                                   if "Using a password" not in line)
-                result.record("③b 默认授权（adm）", False, detail)
-                raise RuntimeError(f"默认授权执行失败：{script.name}")
-        result.record("③b 默认授权（adm，桥接）", True, f"{len(grants)} 个脚本")
+    def step_upload_model(self, model_path: Path, model: dict, result: PipelineResult) -> None:
+        """把模型原件上传到 adm_model_snapshot（POST /api/meta/model，仅超管）。
+        审计用途：什么需求生成了什么系统。版本号取尾数存 BIGINT；
+        非数字版本（回归模型 r1 之类）跳过并记录，不阻塞流水线。"""
+        import httpx
+        version = model["model_version"]
+        digits = "".join(ch for ch in version if ch.isdigit())
+        if not digits:
+            result.record("③a 模型快照", True, f"版本 {version} 非数字，跳过快照")
+            return
+        token, _ = _spring_session()
+        response = httpx.post(f"{config.SPRING_BASE_URL}/api/meta/model",
+                              headers={"Authorization": f"Bearer {token}"},
+                              json={"version": version,
+                                    "modelJson": json.dumps(model, ensure_ascii=False)},
+                              timeout=10)
+        if response.status_code != 200:
+            result.record("③a 模型快照", False, response.text[:200])
+            raise RuntimeError("模型快照上传失败")
+        result.record("③a 模型快照", True, f"版本 {version}")
+
+    # ------------------------------------------------------ 默认授权（引导端点）
+
+    def step_apply_grants(self, version: str, model: dict, result: PipelineResult) -> None:
+        """默认授权走 Spring 引导端点（POST /api/admin/grants/bootstrap）。
+        必须排在启动之后：新实体的结构快照要等新产物启动时才导出，
+        引导端点的「目标必须在快照里」校验才放得过去。
+        （原先的 mysql CLI 桥接随本方法改写移除。）"""
+        import httpx
+        token, _ = _spring_session()
+        payload = [{"role": g["role"], "entity": g["entity"], "access": g["access"]}
+                   for g in model.get("grants", [])]
+        response = httpx.post(f"{config.SPRING_BASE_URL}/api/admin/grants/bootstrap",
+                              headers={"Authorization": f"Bearer {token}"},
+                              json=payload, timeout=15)
+        if response.status_code != 200:
+            detail = response.text[:200]
+            result.record("③b 默认授权（bootstrap）", False, detail)
+            raise RuntimeError(f"默认授权引导失败：{detail}")
+        data = response.json().get("data", {})
+        result.record("③b 默认授权（bootstrap）", True,
+                      f"应用 {data.get('applied', 0)} 条，幂等跳过 {data.get('skipped', 0)} 条")
 
     # ------------------------------------------------------------------ ④编译
 
@@ -221,6 +261,21 @@ class Pipeline:
             raise RuntimeError("自动验收存在阻断失败，见 " + str(report_path))
         return report
 
+    def step_mark_current(self, version: str, result: PipelineResult) -> None:
+        """验收通过后把 adm_state.current_version 指到新版本。
+        失败不阻塞上线（状态可重登），但记录留痕。"""
+        import httpx
+        try:
+            token, _ = _spring_session()
+            response = httpx.put(f"{config.SPRING_BASE_URL}/api/system/state",
+                                 headers={"Authorization": f"Bearer {token}"},
+                                 json={"currentVersion": version}, timeout=5)
+            ok = response.status_code == 200
+            detail = "" if ok else response.text[:160]
+        except Exception as error:  # noqa: BLE001 状态登记失败不能毁掉一次成功的生成
+            ok, detail = False, str(error)[:160]
+        result.record("⑦ 版本登记", ok, detail or f"current_version = {version}")
+
     # ------------------------------------------------------------------ 编排
 
     def run(self, model_path: Path) -> PipelineResult:
@@ -230,12 +285,16 @@ class Pipeline:
         print(f"=== SysCraft 流水线：{model_path.name} → v{version[1:] if version.startswith('v') else version} ===")
 
         try:
+            self.step_stop_stale(result)
             version_dir = self.step_generate(model_path, result)
             self.step_apply_ddl(version, model, result)
-            self.step_apply_grants(version, result)
             self.step_build(version_dir, version, result)
             self.step_start(version_dir, result)
+            # 快照与授权都需要在线的 Spring：新产物启动后，快照导出、引导校验才放行
+            self.step_upload_model(model_path, model, result)
+            self.step_apply_grants(version, model, result)
             report = self.step_acceptance(version, result)
+            self.step_mark_current(version, result)
             result.ok = True
             summary = {"version": version, "ok": True, "steps": [s.__dict__ for s in result.steps],
                        "acceptance": report["summary"]}

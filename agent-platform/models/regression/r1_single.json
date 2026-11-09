@@ -1,0 +1,29 @@
+{
+  "model_version": "r1",
+  "requirement": "回归模型一：单实体。任务管理：记录任务标题、优先级，状态按 待办→进行中→完成 流转。",
+  "entities": [
+    {
+      "entity": "reg_task",
+      "class_name": "RegTask",
+      "display_name": "任务",
+      "owner_field": null,
+      "fields": [
+        { "column": "id", "property": "id", "type": "BIGINT", "primary_key": true, "nullable": false, "unique": true, "semantic": "主键", "visibility": "PLAIN", "sensitive": false },
+        { "column": "title", "property": "title", "type": "VARCHAR", "length": 64, "primary_key": false, "nullable": false, "unique": false, "semantic": "任务标题", "visibility": "PLAIN", "sensitive": false },
+        { "column": "priority", "property": "priority", "type": "INT", "primary_key": false, "nullable": false, "unique": false, "semantic": "优先级", "visibility": "PLAIN", "sensitive": false, "sample": "1" },
+        { "column": "status", "property": "status", "type": "VARCHAR", "length": 16, "primary_key": false, "nullable": false, "unique": false, "semantic": "状态", "visibility": "PLAIN", "sensitive": false, "sample": "TODO" },
+        { "column": "created_at", "property": "createdAt", "type": "DATETIME", "primary_key": false, "nullable": false, "unique": false, "semantic": "创建时间", "visibility": "PLAIN", "sensitive": false }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": [
+          { "field": "status", "flow": ["TODO", "DOING", "DONE"] }
+        ]
+      }
+    }
+  ],
+  "grants": [
+    { "role": "USER", "entity": "reg_task", "access": "READ" }
+  ]
+}

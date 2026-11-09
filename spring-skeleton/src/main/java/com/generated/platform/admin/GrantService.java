@@ -17,7 +17,9 @@ import com.generated.platform.security.PermVersionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -109,6 +111,67 @@ public class GrantService {
 
         permVersionService.bumpSubject(subjectType, request.subjectId());
         return toView(existing);
+    }
+
+    /**
+     * 生成流水线的默认授权引导（对契约的**明示扩展**）：新表建成后由流水线
+     * 以超管身份批量落地模型里的 grants 段，取代 Python 直连 adm 的 mysql 桥接。
+     *
+     * <p>逐条走与 grant() 相同的幂等写（存在即更新档位）；超管不受层级约束
+     * （C3 的自身豁免对超管本来就成立）；每处理一个角色 bump 一次版本，
+     * 授权即刻生效。</p>
+     */
+    @Transactional
+    public Map<String, Integer> bootstrap(List<BootstrapGrant> grants) {
+        Operator operator = operatorContext.requireSuperAdmin();
+        int applied = 0;
+        int skipped = 0;
+        Set<Long> bumpedRoles = new HashSet<>();
+        for (BootstrapGrant item : grants) {
+            String access = item.access().trim().toUpperCase();
+            String entity = item.entity().trim();
+            if (!ACCESS_LEVELS.contains(access)) {
+                throw new BizException(ErrorCode.BAD_REQUEST,
+                        "access 只能是 READ / READ_WRITE / FULL：" + item);
+            }
+            if (entitySnapshotMapper.selectById(entity) == null) {
+                // 新产物启动时已导出快照（流水线把授权排在启动之后），缺了就是真错了
+                throw new BizException(ErrorCode.NOT_FOUND, "结构快照里没有这张表：" + entity);
+            }
+            RoleEntity role = roleMapper.selectOne(Wrappers.<RoleEntity>lambdaQuery()
+                    .eq(RoleEntity::getCode, item.role()));
+            if (role == null) {
+                throw new BizException(ErrorCode.NOT_FOUND, "角色不存在：" + item.role());
+            }
+
+            TableGrantEntity existing = grantMapper.selectOne(Wrappers.<TableGrantEntity>lambdaQuery()
+                    .eq(TableGrantEntity::getSubjectType, "ROLE")
+                    .eq(TableGrantEntity::getSubjectId, role.getId())
+                    .eq(TableGrantEntity::getEntity, entity));
+            if (existing != null && access.equals(existing.getAccess())) {
+                skipped++;
+                continue;
+            }
+            if (existing == null) {
+                existing = new TableGrantEntity();
+                existing.setSubjectType("ROLE");
+                existing.setSubjectId(role.getId());
+                existing.setEntity(entity);
+                existing.setGrantedBy(operator.userId());
+            }
+            existing.setAccess(access);
+            grantMapper.insertOrUpdate(existing);
+            applied++;
+            bumpedRoles.add(role.getId());
+        }
+        for (Long roleId : bumpedRoles) {
+            permVersionService.bumpSubject("ROLE", roleId);
+        }
+        return Map.of("applied", applied, "skipped", skipped);
+    }
+
+    /** 引导条目：角色用 code（流水线只知道内置角色码） */
+    public record BootstrapGrant(String role, String entity, String access) {
     }
 
     @Transactional

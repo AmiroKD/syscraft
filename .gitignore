@@ -1,0 +1,29 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Java
+target/
+*.class
+
+# 运行期产物（版本目录、DDL 脚本、会话、日志）
+workspace/
+logs/
+*.log
+
+# 本地配置
+.env
+
+# 编辑器与系统
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# 前端依赖与构建
+node_modules/
+dist/

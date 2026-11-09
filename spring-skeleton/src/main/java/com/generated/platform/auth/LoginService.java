@@ -117,10 +117,9 @@ public class LoginService {
         userMapper.update(null, Wrappers.<UserEntity>lambdaUpdate()
                 .eq(UserEntity::getId, userId)
                 .set(UserEntity::getPasswordHash, BCrypt.hashpw(req.newPassword(), BCrypt.gensalt(10)))
-                .set(UserEntity::getMustChangePassword, 0)
-                // 在 SQL 里自增而不是读改写：避免并发改密时版本号回退
-                .setSql("perm_version = perm_version + 1"));
-        permVersionService.invalidate(userId);
+                .set(UserEntity::getMustChangePassword, 0));
+        // 版本号递增统一走 PermVersionService，不许各处自己写 UPDATE（接口清单 9.2）
+        permVersionService.bumpUser(userId);
     }
 
     private UserEntity requireEnabled(long userId) {

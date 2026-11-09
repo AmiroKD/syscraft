@@ -1,5 +1,6 @@
 package com.generated.platform.security;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.generated.platform.admin.entity.UserEntity;
 import com.generated.platform.admin.mapper.UserMapper;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -55,5 +56,33 @@ public class PermVersionService {
     /** 角色级变更（改能力、删角色）影响一批人，且人数不多，整体清掉最省事也最不会漏 */
     public void invalidateAll() {
         cache.invalidateAll();
+    }
+
+    /**
+     * 递增单个用户的权限版本。<b>所有变更都必须走这里</b>，不许各处自己写 UPDATE——
+     * 漏一处就是一个最长 60 秒的越权窗口（权限 4.9 / 接口清单 9.2）。
+     */
+    public void bumpUser(long userId) {
+        userMapper.update(null, Wrappers.<UserEntity>lambdaUpdate()
+                .eq(UserEntity::getId, userId)
+                .setSql("perm_version = perm_version + 1"));
+        cache.invalidate(userId);
+    }
+
+    /** 角色能力一变，该角色下所有人的权限码都变，必须批量递增 */
+    public void bumpRole(long roleId) {
+        userMapper.update(null, Wrappers.<UserEntity>lambdaUpdate()
+                .eq(UserEntity::getRoleId, roleId)
+                .setSql("perm_version = perm_version + 1"));
+        cache.invalidateAll();
+    }
+
+    /** 授权主体是「用户或角色」，按主体类型分发到对应的一批人 */
+    public void bumpSubject(String subjectType, Long subjectId) {
+        if ("ROLE".equals(subjectType)) {
+            bumpRole(subjectId);
+        } else {
+            bumpUser(subjectId);
+        }
     }
 }

@@ -19,6 +19,12 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class SaTokenConfig implements WebMvcConfigurer {
 
+    private final PermVersionGuard permVersionGuard;
+
+    public SaTokenConfig(PermVersionGuard permVersionGuard) {
+        this.permVersionGuard = permVersionGuard;
+    }
+
     /**
      * 注入 Stateless JWT 实现。必须声明成 Bean：Sa-Token 取 StpLogic 时按类型找，
      * 不注册就还是默认的内存会话实现，重启即全员掉线。
@@ -30,7 +36,11 @@ public class SaTokenConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkLogin()))
+        // 顺序固定：先认证（令牌有效性），再比对权限版本（是否被降权/改密作废）
+        registry.addInterceptor(new SaInterceptor(handle -> {
+                    StpUtil.checkLogin();
+                    permVersionGuard.check();
+                }))
                 .addPathPatterns("/api/**")
                 // 登录接口本身不能要求登录；actuator 不在 /api 下，天然放行
                 .excludePathPatterns("/api/auth/login");

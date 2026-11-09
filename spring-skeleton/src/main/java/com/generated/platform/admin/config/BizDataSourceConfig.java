@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
 
@@ -30,5 +31,11 @@ public class BizDataSourceConfig {
     @Bean
     public SqlSessionFactory bizSqlSessionFactory(@Qualifier("bizDataSource") DataSource dataSource) throws Exception {
         return MybatisSessionFactories.create(dataSource);
+    }
+
+    /** 结构快照要从 information_schema 读列定义，那里用不上 ORM */
+    @Bean
+    public JdbcTemplate bizJdbcTemplate(@Qualifier("bizDataSource") DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
     }
 }

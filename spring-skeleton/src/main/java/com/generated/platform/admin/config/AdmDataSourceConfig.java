@@ -8,6 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
 
@@ -31,5 +32,12 @@ public class AdmDataSourceConfig {
     @Bean
     public SqlSessionFactory admSqlSessionFactory(@Qualifier("admDataSource") DataSource dataSource) throws Exception {
         return MybatisSessionFactories.create(dataSource);
+    }
+
+    /** 平台状态的单行更新用得上；两个数据源都不在时 JdbcTemplate 自动配置也会退出，必须显式给 */
+    @Primary
+    @Bean
+    public JdbcTemplate admJdbcTemplate(@Qualifier("admDataSource") DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
     }
 }

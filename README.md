@@ -50,9 +50,10 @@ cd agent-platform
 # ① 渲染：模型 → workspace/versions/v{n}/ 完整工程 + DDL + 快照 + 验收清单
 PYTHONPATH=src .venv/bin/python -m syscraft.codegen.generator --model models/trade_order.v1.json
 
-# ② 建业务表（mcp 账号，biz 库）与写结构快照（app 账号，adm 库）
+# ② 建业务表（mcp 账号，biz 库）与默认授权（app 账号，adm 库）
+#    结构快照不在这里写：产物启动时从 biz 的 information_schema 自查导出到 adm
 mysql -u"$MCP_USER" -p"$MCP_PWD" biz < workspace/scripts/ddl/v1_001_trade_order.sql
-mysql -u"$APP_USER" -p"$APP_PWD" adm < workspace/scripts/snapshot/v1_001_trade_order.sql
+mysql -u"$APP_USER" -p"$APP_PWD" adm < workspace/scripts/grants/v1_001_trade_order.sql
 
 # ③ 编译并启动
 cd workspace/versions/v1

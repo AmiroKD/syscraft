@@ -11,6 +11,7 @@ import com.generated.platform.auth.dto.MeResult;
 import com.generated.platform.auth.dto.PasswordRequest;
 import com.generated.platform.auth.dto.UserView;
 import com.generated.platform.common.BizException;
+import com.generated.platform.security.PermVersionService;
 import com.generated.platform.common.ErrorCode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -40,6 +41,7 @@ public class LoginService {
     private final UserMapper userMapper;
     private final RoleMapper roleMapper;
     private final TokenService tokenService;
+    private final PermVersionService permVersionService;
 
     /** key = username。故意按用户名而非按 IP：同一台机器上的多个账号互不影响 */
     private final Cache<String, Integer> failures = Caffeine.newBuilder()
@@ -47,10 +49,12 @@ public class LoginService {
             .expireAfterWrite(LOCK_DURATION)
             .build();
 
-    public LoginService(UserMapper userMapper, RoleMapper roleMapper, TokenService tokenService) {
+    public LoginService(UserMapper userMapper, RoleMapper roleMapper, TokenService tokenService,
+                        PermVersionService permVersionService) {
         this.userMapper = userMapper;
         this.roleMapper = roleMapper;
         this.tokenService = tokenService;
+        this.permVersionService = permVersionService;
     }
 
     public LoginResult login(LoginRequest req) {
@@ -76,20 +80,18 @@ public class LoginService {
         }
 
         failures.invalidate(username);
+        // 登录是权威时刻：清掉可能过期的版本缓存，免得刚签发的令牌被判成「已变更」
+        permVersionService.invalidate(user.getId());
         String token = tokenService.issue(user.getId(), user.getPermVersion());
         return new LoginResult(token, user.getPermVersion(), toView(user));
     }
 
     /**
-     * 当前用户。每次调用都比对令牌里的权限版本与库里的值：
-     * 管理员刚给他降了权，下一次请求就该被挡下，而不是等令牌过期。
+     * 当前用户。权限版本比对已上移到拦截器（PermVersionGuard），
+     * 这里只负责组装视图——判定逻辑只有一处，免得两个地方口径不一致。
      */
     public MeResult me(long userId) {
         UserEntity user = requireEnabled(userId);
-        Integer tokenPv = tokenService.currentPermVersion();
-        if (tokenPv == null || !tokenPv.equals(user.getPermVersion())) {
-            throw new BizException(ErrorCode.TOKEN_STALE, "权限已变更，请重新登录");
-        }
         RoleEntity role = roleMapper.selectById(user.getRoleId());
         if (role == null) {
             // 角色被删而用户还在，属于数据异常；拒绝比放行安全（权限 4.6：失败即拒绝）
@@ -118,6 +120,7 @@ public class LoginService {
                 .set(UserEntity::getMustChangePassword, 0)
                 // 在 SQL 里自增而不是读改写：避免并发改密时版本号回退
                 .setSql("perm_version = perm_version + 1"));
+        permVersionService.invalidate(userId);
     }
 
     private UserEntity requireEnabled(long userId) {

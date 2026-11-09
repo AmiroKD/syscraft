@@ -1,0 +1,14 @@
+-- 新表的默认授权 —— 模型 {{ model_version }} 渲染，幂等
+--
+-- 只做授权，不写结构快照：结构快照由产物在启动时从 information_schema 自查导出
+-- （platform/meta/SnapshotService）。这样 adm 库对平台侧始终不可达，
+-- 而快照永远等于当前真实结构，不会出现「代码改了、快照没跟上」。
+--
+-- 默认从保守起步：普通角色只读，写入权由管理员显式上调（权限 4.4 / 基线 B3）。
+
+{% for g in grants %}
+INSERT INTO adm_table_grant (subject_type, subject_id, entity, access, granted_by)
+SELECT 'ROLE', r.id, '{{ entity }}', '{{ g.access }}', NULL
+  FROM adm_role r WHERE r.code = '{{ g.role }}'
+ON DUPLICATE KEY UPDATE access = VALUES(access);
+{% endfor %}

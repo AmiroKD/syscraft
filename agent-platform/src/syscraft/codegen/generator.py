@@ -251,13 +251,13 @@ def generate(model_path: Path, project_root: Path) -> dict:
         entity["_fields"] = [prepare_field(f) for f in entity["fields"]]
         written[entity["class_name"]] = render_entity(env, entity, generated_root, str(templates_dir))
 
-    # ③ DDL 与结构快照
+    # ③ DDL 与默认授权（结构快照由产物启动时自查导出）
     ddl_dir = workspace / "scripts" / "ddl"
     ddl_dir.mkdir(parents=True, exist_ok=True)
-    snapshot_dir = workspace / "scripts" / "snapshot"
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    grants_dir = workspace / "scripts" / "grants"
+    grants_dir.mkdir(parents=True, exist_ok=True)
 
-    ddl_files, snapshot_files = [], []
+    ddl_files, grant_files = [], []
     for index, entity in enumerate(model["entities"], start=1):
         ddl_path = ddl_dir / f"{version}_00{index}_{entity['entity']}.sql"
         unique_clause = "".join(
@@ -271,21 +271,13 @@ def generate(model_path: Path, project_root: Path) -> dict:
         ddl_files.append(str(ddl_path.relative_to(project_root)))
 
         grants = [g for g in model.get("grants", []) if g["entity"] == entity["entity"]]
-        field_values = ",\n".join(
-            "    ('{e}', '{c}', '{t}', '{s}', {n}, {u}, {sen}, '{v}', {o})".format(
-                e=entity["entity"], c=f["column"], t=f["type"], s=f["semantic"],
-                n=f["nullable_int"], u=f["unique_int"], sen=f["sensitive_int"],
-                v=f["visibility"], o=i)
-            for i, f in enumerate(entity["_fields"], start=1)
-        )
-        snapshot_path = snapshot_dir / f"{version}_00{index}_{entity['entity']}.sql"
-        snapshot_path.write_text(env.get_template("sql/snapshot.sql.j2").render(
-            entity=entity["entity"], fields=entity["_fields"], field_values=field_values,
-            display_name=entity["display_name"],
-            owner_field="NULL" if not entity.get("owner_field") else f"'{entity['owner_field']}'",
-            version=index, grants=grants, model_version=version,
+        # 结构快照不再由生成器写：产物启动时从 information_schema 自查导出，
+        # 生成器只负责「新表默认给谁什么档位」这类策略。
+        grants_path = grants_dir / f"{version}_00{index}_{entity['entity']}.sql"
+        grants_path.write_text(env.get_template("sql/grants.sql.j2").render(
+            entity=entity["entity"], grants=grants, model_version=version,
         ), encoding="utf-8")
-        snapshot_files.append(str(snapshot_path.relative_to(project_root)))
+        grant_files.append(str(grants_path.relative_to(project_root)))
 
     # ④ 验收清单：与代码同源，放在 templates/acceptance 下（不放版本目录，避免随回滚丢失）
     acceptance = build_acceptance(model, written)
@@ -299,7 +291,7 @@ def generate(model_path: Path, project_root: Path) -> dict:
         "version_dir": str(version_dir),
         "files": written,
         "ddl": ddl_files,
-        "snapshot": snapshot_files,
+        "grants": grant_files,
         "acceptance": str(acceptance_path.relative_to(project_root)),
     }
 

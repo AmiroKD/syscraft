@@ -80,7 +80,13 @@
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
         </dependency>
-    </dependencies>
+        <!-- 单测：密码学组件等纯逻辑用最快的方式钉死，不起 Spring 上下文 -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
 
     <build>
         <plugins>

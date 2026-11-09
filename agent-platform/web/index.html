@@ -85,6 +85,9 @@
   .log-list { font: 11px/1.6 "SF Mono", Menlo, Consolas, monospace; color: var(--ink-2);
               background: #f7f8fa; border-radius: 6px; padding: 6px 8px;
               max-height: 140px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .capability-card { background: var(--accent-soft); border: 1px solid var(--line);
+                     border-radius: var(--radius); padding: 10px 14px; max-width: 78%;
+                     font-size: 13px; color: var(--ink); }
 
   /* ---- 输入区 ---- */
   .composer { border-top: 1px solid var(--line); background: var(--panel); padding: 12px 8%; display: flex; gap: 10px; }
@@ -337,6 +340,7 @@ function handleEvent(event, ctx) {
     case "error": addBubble("assistant", event.message, true); break;
     case "file": ensurePhasePanel(ctx); addFileLine(ctx, event.path); break;
     case "log": ensurePhasePanel(ctx); addLogLine(ctx, event.text); break;
+    case "capability": renderCapabilityCard(event); break;
     case "phase": {
       ensurePhasePanel(ctx);
       const line = document.createElement("div"); line.className = "phase-line";
@@ -436,6 +440,13 @@ function addLogLine(ctx, text) {
 function addThought(text) {
   const el = document.createElement("div"); el.className = "thought"; el.textContent = text;
   addNode(el);
+}
+function renderCapabilityCard(event) {
+  const card = document.createElement("div");
+  card.className = "capability-card";
+  const names = (event.available || []).map(e => e.display).join("、") || "（暂无）";
+  card.textContent = `当前能力范围：${names}。${event.hint || ""}`;
+  addNode(card);
 }
 function setSendDisabled(disabled) {
   $("send").disabled = disabled;

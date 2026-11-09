@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -114,12 +115,52 @@ async def index():
     return FileResponse(config.PROJECT_ROOT / "web" / "index.html")
 
 
+class _LoginThrottle:
+    """登录失败限速（P1-4）：同名+来源 5 次失败锁 5 分钟。内存态、单机语义内自洽——
+    多实例部署应换集中存储（记入设计边界）。成功登录即清零。"""
+
+    MAX_FAILURES = 5
+    LOCK_SECONDS = 300
+
+    def __init__(self):
+        self._failures: dict[str, list[float]] = {}
+
+    def _key(self, username: str, ip: str) -> str:
+        return f"{username}@{ip}"
+
+    def locked(self, username: str, ip: str) -> int | None:
+        """返回剩余锁定秒数（None = 未锁定）。"""
+        key = self._key(username, ip)
+        now = time.time()
+        marks = [t for t in self._failures.get(key, []) if now - t < self.LOCK_SECONDS]
+        self._failures[key] = marks
+        if len(marks) >= self.MAX_FAILURES:
+            return int(self.LOCK_SECONDS - (now - marks[0])) + 1
+        return None
+
+    def record_failure(self, username: str, ip: str) -> None:
+        self._failures.setdefault(self._key(username, ip), []).append(time.time())
+
+    def clear(self, username: str, ip: str) -> None:
+        self._failures.pop(self._key(username, ip), None)
+
+
+_throttle = _LoginThrottle()
+
+
 @app.post("/api/auth/login")
-async def login(payload: LoginRequest) -> dict:
+async def login(payload: LoginRequest, request: Request):
+    ip = request.client.host if request.client else "?"
+    remaining = _throttle.locked(payload.username, ip)
+    if remaining is not None:
+        return JSONResponse(status_code=429, content=envelope(
+            None, f"失败次数过多，请 {max(remaining // 60, 1)} 分钟后再试", 429))
     try:
         data = await _client.login(payload.username, payload.password)
     except SpringError as error:
+        _throttle.record_failure(payload.username, ip)
         return _error(error)
+    _throttle.clear(payload.username, ip)
     _identities.remember(data["token"], data["user"])
     return envelope(data)
 
@@ -169,7 +210,8 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
             return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
 
         gen_result = await _generation.handle(payload.message, token, session,
-                                              emit=lambda event: _hub.emit(session.id, event))
+                                              emit=lambda event: _hub.emit(session.id, event),
+                                              me=me)
         if gen_result is not None:
             return envelope({"reply": gen_result.get("reply"), "table": None,
                              "session_id": session.id})
@@ -241,7 +283,7 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
         """一条消息的完整派发。生成流可能提前返回而流水线仍在跑——
         follow 循环靠 gen_state 槽位判断还有没有事件会来。"""
         try:
-            gen_result = await _generation.handle(payload.message, token, session, emit)
+            gen_result = await _generation.handle(payload.message, token, session, emit, me=me)
             if gen_result is not None:
                 if gen_result.get("reply"):
                     emit({"type": "text", "text": gen_result["reply"]})

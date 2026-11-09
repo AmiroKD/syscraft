@@ -88,7 +88,7 @@ def store(env):
 async def test_not_generation_intent_returns_none(store):
     flow = GenerationFlow(client=None)
     session = store.create(user_id=1)
-    assert await flow.handle("查一下订单", "tk", session, emit=lambda e: None) is None
+    assert await flow.handle("查一下订单", "tk", session, emit=lambda e: None, me={"roleCode": "SUPER_ADMIN"}) is None
 
 
 @pytest.mark.anyio
@@ -109,11 +109,11 @@ async def test_clarification_then_answer_then_plan(store, env):
     flow = GenerationFlow(client=None)
     session = store.create(user_id=1)
 
-    first = await flow.handle("做一个图书管理系统", "tk", session, lambda e: None)
+    first = await flow.handle("做一个图书管理系统", "tk", session, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
     assert "借阅要登记谁吗" in first["reply"]
     assert session.get_slot("gen_state") == "awaiting_answers"
 
-    second = await flow.handle("按默认的来", "tk", session, lambda e: None)
+    second = await flow.handle("按默认的来", "tk", session, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
     assert "确认生成" in second["reply"]
     assert session.get_slot("gen_state") == "awaiting_plan"
     # 回答轮的入参：需求还是原话，回答是用户消息
@@ -130,8 +130,8 @@ async def test_cancel_plan(store, env):
     FAKE_EXTRACTOR_SCRIPT.append([PLAN_RESULT])
     flow = GenerationFlow(client=None)
     session = store.create(user_id=1)
-    await flow.handle("做一个图书管理系统", "tk", session, lambda e: None)
-    result = await flow.handle("算了", "tk", session, lambda e: None)
+    await flow.handle("做一个图书管理系统", "tk", session, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
+    result = await flow.handle("算了", "tk", session, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
     assert "取消" in result["reply"]
     assert session.get_slot("gen_state") is None
 
@@ -147,8 +147,8 @@ async def test_pipeline_runs_and_emits_events(store, env, monkeypatch):
 
     flow = GenerationFlow(client=None)
     session = store.create(user_id=1)
-    await flow.handle("做一个图书管理系统", "tk", session, events.append)
-    confirmed = await flow.handle("确认生成", "tk", session, events.append)
+    await flow.handle("做一个图书管理系统", "tk", session, events.append, me={"roleCode": "SUPER_ADMIN"})
+    confirmed = await flow.handle("确认生成", "tk", session, events.append, me={"roleCode": "SUPER_ADMIN"})
     assert "开始生成" in confirmed["reply"]
 
     # 流水线在后台线程跑：让事件循环转几圈等它完成
@@ -162,3 +162,21 @@ async def test_pipeline_runs_and_emits_events(store, env, monkeypatch):
     assert "phase" in kinds and "text" in kinds
     # keep_running 已传给流水线：新版本要留在 8080 承接业务
     assert FakePipeline.captured.get("keep_running") is True
+
+
+# ---------------------------------------------------------------- 角色门槛（P0-2）
+
+@pytest.mark.anyio
+async def test_generation_requires_privileged_role(store):
+    """fail-closed：USER 拒绝、me 缺失拒绝、超管放行；拒绝消息落会话。"""
+    FAKE_EXTRACTOR_SCRIPT.append([PLAN_RESULT])  # 超管放行分支会走到抽取
+    flow = GenerationFlow(client=None)
+    session = store.create(user_id=1)
+    for me in ({"roleCode": "USER"}, None):
+        result = await flow.handle("做一个库存管理系统", "tk", session, lambda e: None, me=me)
+        assert result is not None and "管理员权限" in result["reply"], me
+    # 拒绝也落盘（审计可见谁想生成）
+    assert any(m["role"] == "user" for m in session.messages()[-2:])
+    ok = await flow.handle("做一个库存管理系统", "tk", session, lambda e: None,
+                           me={"roleCode": "SUPER_ADMIN"})
+    assert ok is not None and "管理员权限" not in (ok.get("reply") or "")

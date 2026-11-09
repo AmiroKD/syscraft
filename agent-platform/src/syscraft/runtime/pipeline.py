@@ -108,9 +108,11 @@ class Pipeline:
 
     # ------------------------------------------------------------------ ③建表
 
-    def step_apply_ddl(self, version: str, model: dict, result: PipelineResult) -> None:
+    def step_apply_ddl(self, version: str, model: dict, result: PipelineResult) -> list[str]:
+        """返回本次实际建表清单（取消/失败时报告里可见，孤儿表清理有据可查）。"""
         ddl_dir = self.root / "workspace/scripts/ddl"
         scripts = sorted(ddl_dir.glob(f"{version}_*.sql"))
+        created = [entity["entity"] for entity in model.get("entities", [])]
         connection = pymysql.connect(
             host="127.0.0.1", port=3306,
             user=os.environ.get("MCP_USER", ""), password=os.environ.get("MCP_PWD", ""),
@@ -144,6 +146,7 @@ class Pipeline:
         finally:
             connection.close()
         result.record("③ 建表（biz）", True, f"{len(scripts)} 个脚本，{applied} 条语句")
+        return created
 
     # --------------------------------------------------- 模型快照（明示扩展）
 
@@ -307,6 +310,13 @@ class Pipeline:
         result = PipelineResult(version=version, notify=self._notify)
         print(f"=== SysCraft 流水线：{model_path.name} → v{version[1:] if version.startswith('v') else version} ===")
 
+        # 记住生成前的运行版本：取消/失败后把旧产物拉回来（P0-1）。
+        # 必须在停旧产物之前读——旧产物一停，state 端点就读不到了。
+        # 惰性导入防环：switcher.switch 内部也 import pipeline 的端口探测
+        from syscraft.runtime import switcher as version_switcher
+        previous_version = version_switcher.current_version()
+        created_tables: list[str] = []  # 已建表清单（失败/取消进报告，孤儿表清理有据）
+
         try:
             self.step_stop_stale(result)
             # 以下每个步骤前都检查取消：步骤是边界——一旦进到 mvn/健康等待内部
@@ -314,7 +324,7 @@ class Pipeline:
             self._check_cancel()
             version_dir = self.step_generate(model_path, result)
             self._check_cancel()
-            self.step_apply_ddl(version, model, result)
+            created_tables = self.step_apply_ddl(version, model, result)
             self._check_cancel()
             self.step_build(version_dir, version, result)
             self._check_cancel()
@@ -336,24 +346,39 @@ class Pipeline:
             result.record("✕ 取消", False, "用户取消，已停止后续步骤")
             summary = {"version": version, "ok": False, "failedStep": result.failed_step,
                        "steps": [s.__dict__ for s in result.steps], "error": "用户取消生成",
-                       "cancelled": True}
+                       "cancelled": True, "tablesCreated": created_tables}
         except Exception as error:
             result.ok = False
             result.failed_step = result.steps[-1].name if result.steps else "?"
             result.error = str(error)
             summary = {"version": version, "ok": False, "failedStep": result.failed_step,
-                       "steps": [s.__dict__ for s in result.steps], "error": str(error)}
+                       "steps": [s.__dict__ for s in result.steps], "error": str(error),
+                       "tablesCreated": created_tables}
         finally:
             # 对话式生成成功后不关产物：新版本直接上线承接业务对话（运行时 5 节）。
             # 取消/失败都走这里停产物——已启动的进程不陪取消标志一起活着
             if not (self._keep_running and result.ok):
                 self.stop()
+                # 自动回滚：旧产物被本流水线杀了，失败/取消后必须有人把它扶起来，
+                # 否则一次取消 = 全平台停机（实测踩过：v8 取消后 v7 躺尸）
+                if previous_version and previous_version != version:
+                    self._rollback(previous_version, result)
 
         report_path = self.root / "workspace/logs" / f"pipeline-{version}.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\n结果：{'成功' if result.ok else '失败'}，报告：{report_path}")
         return result
+
+    def _rollback(self, version: str, result: PipelineResult) -> None:
+        """失败/取消出口：把生成前的版本重新拉起。回滚失败不吞报告，明示人工介入。"""
+        from syscraft.runtime import switcher as version_switcher
+        try:
+            version_switcher.switch(version)
+            result.record("⑧ 回滚旧版本", True, f"已恢复运行 {version}")
+        except version_switcher.SwitchError as error:
+            result.record("⑧ 回滚旧版本", False,
+                          f"{error}；需人工介入：POST /api/runtime/switch 到 {version}")
 
     def _check_cancel(self) -> None:
         if self._should_cancel and self._should_cancel():

@@ -50,6 +50,28 @@ EXTRACT_PROMPT_TEMPLATE = """你是业务系统的需求分析师。从用户需
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
+# 指令注入特征（P1-2c）：需求文本是不可信输入，拼接进 prompt 前先过一道启发式检测。
+# 命中不意味真的能提权（输出受限 JSON + 权限收敛在平台侧），但必须拦下并留痕——
+# 否则威胁模型里「用户输入当数据」这句话没有执行点
+_INJECTION_PATTERNS = (
+    re.compile(r"忽略(以上|上面|前面|之前|所有|全部)*(的)?(指令|提示|规则|要求|设定)"),
+    re.compile(r"(无视|不顾|不要管)(以上|上面|前面|之前|所有|全部)*(的)?(指令|提示|规则|要求)"),
+    re.compile(r"ignore\s+(all\s+)?(previous|above|prior)\s+instructions", re.IGNORECASE),
+    re.compile(r"你现在是?(一个)?(不受限|无限制|没有限制|越狱)", re.IGNORECASE),
+    re.compile(r"(系统提示|system\s*prompt)"),
+    re.compile(r"(DAN|越狱模式|开发者模式)", re.IGNORECASE),
+)
+
+
+def detect_injection(requirement: str) -> str | None:
+    """返回命中的注入特征描述（None = 未命中）。"""
+    text = requirement or ""
+    for pattern in _INJECTION_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(0)
+    return None
+
 
 @dataclass
 class Question:
@@ -81,6 +103,11 @@ class RequirementExtractor:
 
     def extract(self, requirement: str, answers: list[str] | None = None) -> ExtractResult:
         """answers 非空 = 第二轮：把用户对追问的回答带给模型，不再追问。"""
+        injected = detect_injection(requirement)
+        if injected:
+            raise schema_map.ModelValidationError(
+                [f"需求描述里包含疑似指令注入的内容（{injected!r}）。"
+                 "请用自然语言描述业务需求，不要在需求里给系统下指令。"])
         messages = self._messages(requirement, answers or [])
         content = self._llm_call(messages)
         try:

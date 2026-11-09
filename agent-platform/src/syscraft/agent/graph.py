@@ -260,6 +260,15 @@ class BusinessAgent:
                 result = await toolbox.call(name, args, session)
             except ToolInputError as error:
                 result = {"ok": False, "error": str(error)}
+                # 能力边界兜底（P1-1）：实体不存在是「系统没有这个能力」，措辞不交给
+                # 模型自由发挥——直接发结构化能力卡片，前端确定性渲染 + 生成引导
+                if "可用实体" in str(error):
+                    events.append({
+                        "type": "capability",
+                        "available": [{"entity": e.entity, "display": e.display_name}
+                                      for e in self._catalog.all()],
+                        "hint": "系统里还没有这个能力。可以联系管理员描述需求生成新系统。",
+                    })
             except SpringError as error:
                 entity = self._catalog.by_name(str(args.get("entity", "")))
                 result = {"ok": False, "error": _spring_message(error, entity)}

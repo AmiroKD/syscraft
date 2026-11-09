@@ -28,6 +28,10 @@ RESERVED = {"order", "group", "user", "key", "index", "desc", "asc", "limit", "s
 # 语义安全词表（5.4）：命中即标记敏感。只上调不下调，由调用方比对旧标记
 SENSITIVE_WORDS = ("薪资", "工资", "身份证", "手机", "银行卡", "密码", "银行账号")
 
+# DDL/SQL 结构字符：语义文本会拼进 DDL COMMENT（单引号闭合逃逸）——
+# 与其转义不如直接拒绝：业务描述里不该有这些字符，注入意图在这里被确定性拦下
+FORBIDDEN_IN_TEXT = ("'", '"', ";", "--", "\\", "/*")
+
 _COMPUTED = re.compile(r"^\s*([a-z_][a-z0-9_]*)\s*(\*|\+|-)\s*([a-z_][a-z0-9_]*)\s*$")
 _CONSTRAINT = re.compile(r"^\s*([a-z_][a-z0-9_]*)\s*(>=|<=|>|<|==|!=)\s*(-?\d+(?:\.\d+)?)\s*$")
 _ARITHMETIC = {"*": "MULTIPLY", "+": "ADD", "-": "SUBTRACT"}
@@ -75,6 +79,16 @@ def validate(ir: dict, existing_entities: set[str] | None = None) -> list[str]:
         elif existing_entities and name in existing_entities:
             problems.append(f"实体 {name} 与已有表重名（本次不支持增量，请换名）")
         names.add(name)
+
+        # 展示名/语义文本会拼进 DDL 注释与前端：结构字符一律拒绝（P1-2a 注入面）
+        display = str(entity.get("displayName", ""))
+        if any(ch in display for ch in FORBIDDEN_IN_TEXT):
+            problems.append(f"实体 {name} 的展示名含非法字符（引号/分号/注释符）")
+        for column in entity.get("columns") or []:
+            semantic = str(column.get("semantic", ""))
+            if any(ch in semantic for ch in FORBIDDEN_IN_TEXT):
+                problems.append(
+                    f"{name}.{column.get('name')} 的语义描述含非法字符（引号/分号/注释符）")
 
         columns = entity.get("columns") or []
         if not 1 <= len(columns) <= 40:

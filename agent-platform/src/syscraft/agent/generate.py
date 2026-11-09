@@ -38,6 +38,10 @@ CANCEL_PLAN = {"取消", "算了", "不生成", "不了", "取消生成", "先�
 
 
 class GenerationFlow:
+    # 生成触发允许的角色（P0-2：全局生成锁会停掉在线产物并锁所有会话，
+    # 不能让任意 USER 一句话把平台打瘫——DoS 通道必须关死）
+    GENERATION_ROLES = {"SUPER_ADMIN", "ADMIN"}
+
     def __init__(self, client: SpringClient):
         self._client = client
         # 全局生成锁意味着同一时刻至多一个生成在跑，一个取消标志就够。
@@ -49,9 +53,12 @@ class GenerationFlow:
         return bool(GEN_INTENT.search(message or ""))
 
     async def handle(self, message: str, token: str, session,
-                     emit: Callable[[dict], None]) -> dict | None:
+                     emit: Callable[[dict], None],
+                     me: dict | None = None) -> dict | None:
         """处理生成模式的一条消息；返回 None 表示不是生成请求（回退业务模式）。
 
+        me：当前用户（app 层从 _identity 传入）。生成触发按角色门槛校验，
+        fail-closed：me 缺失一律拒绝——app 层忘传不能变成裸奔。
         进入本方法的都会落盘用户原话——业务图不再重复落。
         """
         state = session.get_slot("gen_state") or "idle"
@@ -83,6 +90,14 @@ class GenerationFlow:
         # idle：先判生成意图，不是就交回业务模式（不落盘，业务图自己落）
         if not self.is_generation_intent(message):
             return None
+
+        # 生成触发角色门槛（fail-closed）：命中意图但无权 → 落盘后拒绝
+        if (me or {}).get("roleCode") not in self.GENERATION_ROLES:
+            session.append("user", "text", message)
+            reply = ("生成新系统需要管理员权限（当前角色无权触发）。\n"
+                     "你可以继续查询/登记现有系统的数据；需要新系统请联系管理员。")
+            session.append("assistant", "text", reply)
+            return {"reply": reply}
 
         session.append("user", "text", message)
         session.set_slot("gen_requirement", message)

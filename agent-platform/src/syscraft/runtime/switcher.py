@@ -98,6 +98,12 @@ def switch(version: str) -> dict:
     return {"version": version, "pid": _jar_process.pid}
 
 
+def current_version() -> str | None:
+    """当前登记的运行版本（供流水线失败回滚等外部使用）。
+    产物不在线时读不到 → None，调用方自行判断是否需要回滚。"""
+    return _current_version()
+
+
 def _current_version() -> str | None:
     """从产物读当前版本；state 端点要登录（401 的 data 是 null），带 admin 令牌。
     产物不在线/任何异常都返回 None——清单里只是没有「正在运行」的标记。"""
@@ -106,7 +112,9 @@ def _current_version() -> str | None:
                              headers={"Authorization": f"Bearer {_admin_token()}"}, timeout=3)
         data = response.json().get("data") or {}
         return data.get("currentVersion")
-    except (httpx.HTTPError, ValueError, KeyError):
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, SwitchError):
+        # TypeError：登录失败时 data 为 None 再取 token 会炸（实测踩过）——
+        # 探针读不到状态就当 None，调用方自行决定是否回滚，不能让流水线因此挂掉
         return None
 
 
@@ -115,4 +123,8 @@ def _admin_token() -> str:
         "username": os.environ.get("ADMIN_USER", ""),
         "password": os.environ.get("ADMIN_INIT_PWD", ""),
     }, timeout=5)
-    return response.json()["data"]["token"]
+    body = response.json()
+    token = (body.get("data") or {}).get("token")
+    if not token:
+        raise SwitchError(f"超管登录失败：{body.get('msg')}")
+    return token

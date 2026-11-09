@@ -302,8 +302,11 @@ def build_acceptance(model: dict, written: dict[str, list[str]]) -> dict:
         {"id": "health", "category": "service", "level": "block", "title": "健康检查为 UP",
          "check": {"type": "health", "path": "/actuator/health"}},
     ]
+    # 超管身份用系统超管（凭证来自环境）：API 创建超管账号被委托约束禁止——这是防线不是障碍。
+    # USER 才是临时验收号：走管理接口创建、验收完停用（运行时 3.3）。
     accounts = [
-        {"role": "SUPER_ADMIN", "username": "__acc_admin__", "passwordRef": "env:ACC_ADMIN_PWD"},
+        {"role": "SUPER_ADMIN", "username": "__acc_admin__", "usernameRef": "env:ADMIN_USER",
+         "passwordRef": "env:ADMIN_INIT_PWD"},
         {"role": "USER", "username": "__acc_user__", "passwordRef": "env:ACC_USER_PWD"},
     ]
 

@@ -45,6 +45,8 @@ class AcceptanceRunner:
         account = next((a for a in self.spec.get("accounts", []) if a["username"] == username), None)
         if account is None:
             raise CaseFailure(f"验收清单里没有账号 {username}")
+        if "usernameRef" in account:
+            username = os.environ.get(account["usernameRef"].split(":", 1)[-1], "")
         env_name = account["passwordRef"].split(":", 1)[-1]
         password = os.environ.get(env_name)
         if not password:

@@ -59,3 +59,16 @@ class SpringClient:
     async def aggregate(self, entity: str, request: dict, token: str) -> list[dict]:
         body = await self._post(f"/api/biz/{entity}/aggregate", request, token)
         return body["data"]
+
+    async def preview_delete(self, entity: str, ids: list[int], token: str) -> dict[str, Any]:
+        """删除预告：拿确认令牌与影响行数，不执行任何删除。"""
+        body = await self._post("/api/confirm/preview", {"entity": entity, "ids": ids}, token)
+        return body["data"]
+
+    async def delete(self, entity: str, ids: list[int], confirm_token: str, token: str) -> int:
+        body = await self._post(
+            f"/api/biz/{entity}/delete",
+            {"ids": ids, "confirmToken": confirm_token},
+            token,
+        )
+        return body["data"]

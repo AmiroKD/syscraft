@@ -55,7 +55,7 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
 
-    reply = await _chat.handle(payload.message, token)
+    reply = await _chat.handle(payload.message, token, payload.session_id)
     table = None
     if reply.table is not None:
         table = {

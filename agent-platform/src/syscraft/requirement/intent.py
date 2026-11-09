@@ -16,7 +16,9 @@ from typing import Protocol
 from syscraft.requirement.model_catalog import EntityInfo, ModelCatalog, catalog
 
 QUERY_WORDS = ("查", "看", "列", "有哪些", "多少", "统计", "汇总")
-WRITE_WORDS = ("删除", "删掉", "去掉", "移除", "新增", "录入", "添加", "修改", "改成")
+DELETE_WORDS = ("删除", "删掉", "去掉", "移除")
+# 新增/修改仍不支持：它们的预告形态（字段值清单）和删除不同，等做那两类预告时再放开
+WRITE_WORDS = ("新增", "录入", "添加", "修改", "改成", "更新")
 
 FIELD_VALUE = re.compile(r"([\u4e00-\u9fa5A-Za-z_]{1,16})\s*(?:是|为|等于|=)\s*([^\s，,。；;]+)")
 COUNT_WORDS = re.compile(r"(\d+)\s*(?:条|行|个|笔)")
@@ -63,16 +65,24 @@ class RuleBasedIntentResolver:
             names = "、".join(f"「{e.display_name}」" for e in self.catalog.all()) or "（模型里还没有实体）"
             raise IntentError(f"没认出要操作哪张表。目前支持：{names}")
 
-        if any(word in text for word in WRITE_WORDS):
-            raise IntentError(
-                f"这一版只通了查询链路，对「{entity.display_name}」的新增 / 修改 / 删除还没接上。"
-            )
+        op = "QUERY"
+        if any(word in text for word in DELETE_WORDS):
+            # 删除走「预告 → 用户确认 → 核销」流程，条件只允许精确匹配，
+            # 模糊条件的影响面说不清，预告文案也就没法负责
+            op = "DELETE"
+        elif any(word in text for word in WRITE_WORDS):
+            raise IntentError(f"这一版的新增 / 修改还没接上，目前支持查询与删除。")
 
         conditions = self._conditions(text, entity)
+        if op == "DELETE" and not conditions:
+            raise IntentError(
+                f"删除需要明确范围，比如「删除{entity.display_name}，订单号是SO-1」；不支持无条件全删。"
+            )
+
         size = self._size(text)
         order_by = (("created_at", "DESC"),) if entity.field("created_at") else ()
 
-        return Intent(op="QUERY", entity=entity, conditions=tuple(conditions),
+        return Intent(op=op, entity=entity, conditions=tuple(conditions),
                       order_by=order_by, page=1, size=size)
 
     def _conditions(self, text: str, entity: EntityInfo) -> list[Condition]:

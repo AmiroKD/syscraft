@@ -1,0 +1,60 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: syscraft-skeleton
+
+  # 双库隔离（权限 6 节）：骨架这一步只连 adm——业务表要到第一张模板生成后才存在。
+  # biz 数据源在生成流程落地时补上，届时两个 DataSource 都要显式声明并指定 @Primary。
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/adm?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    # 账号口令只从环境变量取（源头是 ~/.adaptive/db.env，600，不在项目内）
+    username: ${APP_USER:app}
+    password: ${APP_PWD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: adm-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+sa-token:
+  # 令牌走 Authorization 头，不落 Cookie：Python 侧只做透传，浏览器不直连 Spring
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 43200          # 12 小时
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  is-read-header: true
+  is-read-cookie: false
+  is-read-body: false
+  # JWT 签名密钥同样只从环境变量取；泄露即等同令牌可伪造
+  jwt-secret-key: ${JWT_SECRET:}
+  is-print: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      # 不吐数据库连接串、磁盘路径这类内部信息
+      show-details: never
+  health:
+    db:
+      enabled: true
+
+logging:
+  level:
+    com.generated.platform: INFO

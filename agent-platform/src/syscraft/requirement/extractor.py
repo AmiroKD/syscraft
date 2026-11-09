@@ -39,8 +39,8 @@ EXTRACT_PROMPT_TEMPLATE = """你是业务系统的需求分析师。从用户需
 信息不足有歧义（最多 3 个问题，每个必带默认值）：
 {"needClarification": true, "questions": [{"question": "...", "default": "我的默认理解"}]}
 
-可以建模：
-{"entities": [...], "relations": [...], "rules": [...], "roles": [...], "assumptions": [...]}
+可以建模（列数组键名必须是 columns；列内键：name/type/nullable/unique/length/semantic）：
+{"entities": [{"name": "...", "displayName": "...", "columns": [{"name": "...", "type": "VARCHAR", "nullable": false, "semantic": "..."}]}], "relations": [...], "rules": [...], "roles": [...], "assumptions": [...]}
 
 已确认的澄清结论（必须遵守，不得再问）：
 {answers}
@@ -113,7 +113,7 @@ class RequirementExtractor:
                 raise schema_map.ModelValidationError(
                     ["用户放弃回答后模型仍拒绝建模，请换个说法描述需求"])
 
-        ir = parsed
+        ir = schema_map.normalize(parsed)
         problems = schema_map.validate(ir, existing_entities=self._existing)
         if problems:
             # 校验失败喂回模型自修正一次（设计 3 节 ④ 校验的容错路径）
@@ -121,7 +121,7 @@ class RequirementExtractor:
             messages.append({"role": "user", "content":
                              "你的输出有以下问题，修正后重新输出完整 JSON：\n- " + "\n- ".join(problems[:8])})
             content = self._llm_call(messages)
-            ir = self._parse(content)
+            ir = schema_map.normalize(self._parse(content))
             problems = schema_map.validate(ir, existing_entities=self._existing)
             if problems:
                 raise schema_map.ModelValidationError(problems)

@@ -1,0 +1,223 @@
+{
+  "model_version": "v7",
+  "entities": [
+    {
+      "entity": "activity",
+      "class_name": "Activity",
+      "display_name": "活动",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 128
+        },
+        {
+          "column": "start_time",
+          "property": "startTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动开始时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "end_time",
+          "property": "endTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "活动结束时间，可为空表示未设定",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "location",
+          "property": "location",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动地点",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "capacity",
+          "property": "capacity",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动名额上限",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "registered_count",
+          "property": "registeredCount",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "当前已报名人数（有效报名数）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "signup",
+      "class_name": "Signup",
+      "display_name": "报名记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "activity_id",
+          "property": "activityId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属活动ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "applicant_name",
+          "property": "applicantName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 64
+        },
+        {
+          "column": "contact_phone",
+          "property": "contactPhone",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名人联系方式（手机号）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 32
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名状态：已报名/已取消",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 16
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "报名备注",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "activity",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "signup",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "名额占用与已报名人数的增减属跨表并发逻辑，由报名/取消报名业务过程保证：报名时校验 registered_count < capacity 并自增，取消时自减。",
+    "同一活动下同一联系方式（contact_phone）只允许存在一条“已报名”状态的记录，由应用层校验，不使用数据库唯一约束。",
+    "活动“时间”拆分为开始时间与结束时间，结束时间允许为空。",
+    "报名人提交后状态初始为“已报名”，取消后置为“已取消”并释放名额，取消记录保留用于追溯。",
+    "已报名人数只统计状态为“已报名”的记录，已取消记录不计入。",
+    "联系方式以手机号形式存储，长度 32 字符以内，不做格式强校验。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

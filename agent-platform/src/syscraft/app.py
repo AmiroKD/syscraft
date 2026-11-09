@@ -124,6 +124,29 @@ async def login(payload: LoginRequest) -> dict:
     return envelope(data)
 
 
+@app.post("/api/generate/cancel")
+async def generate_cancel(authorization: str | None = Header(default=None)):
+    """取消进行中的生成（《运行时管理设计》步骤边界语义）。
+
+    取消权：发起人或超管。受理即返回——实际取消落成事件由流水线线程在
+    下一个步骤边界完成，前端从 phase/text 事件看到终态。"""
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if me is None:
+        return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+    if not generation_lock.locked():
+        return JSONResponse(status_code=409, content=envelope(None, "当前没有进行中的生成", 409))
+    reason = _generation.request_cancel(me["id"], me.get("roleCode") == "SUPER_ADMIN")
+    if reason:
+        return JSONResponse(status_code=403, content=envelope(None, reason, 403))
+    return envelope({"cancelling": True})
+
+
 @app.post("/api/chat")
 async def chat(payload: ChatRequest, authorization: str | None = Header(default=None)):
     token = _bearer(authorization)

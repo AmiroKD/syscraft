@@ -73,7 +73,18 @@
   .phase-line .mark { font-weight: 600; }
   .phase-line .mark.ok { color: var(--ok); } .phase-line .mark.fail { color: #d4380d; }
   .phase-line .detail { color: var(--ink-2); }
-  .generating-tip { color: var(--ink-2); font-size: 12px; padding-left: 6px; }
+  .phase-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .generating-tip { color: var(--ink-2); font-size: 12px; }
+  .cancel-btn { font-size: 12px; padding: 3px 12px; background: var(--err-bg);
+                color: #d4380d; border: 1px solid var(--err-line); }
+  .cancel-btn:disabled { opacity: .5; cursor: default; }
+  .sub-block { margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 6px; }
+  .sub-block .sub-title { font-size: 12px; color: var(--ink-2); margin-bottom: 3px; }
+  .file-list { font-size: 12px; color: var(--ink-2); line-height: 1.7; }
+  .file-list .more { color: var(--accent); cursor: pointer; }
+  .log-list { font: 11px/1.6 "SF Mono", Menlo, Consolas, monospace; color: var(--ink-2);
+              background: #f7f8fa; border-radius: 6px; padding: 6px 8px;
+              max-height: 140px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 
   /* ---- 输入区 ---- */
   .composer { border-top: 1px solid var(--line); background: var(--panel); padding: 12px 8%; display: flex; gap: 10px; }
@@ -324,13 +335,10 @@ function handleEvent(event, ctx) {
     case "text": addBubble("assistant", event.text); break;
     case "confirm": renderConfirm(event.summary || event.text); break;
     case "error": addBubble("assistant", event.message, true); break;
+    case "file": ensurePhasePanel(ctx); addFileLine(ctx, event.path); break;
+    case "log": ensurePhasePanel(ctx); addLogLine(ctx, event.text); break;
     case "phase": {
-      if (!ctx.phasePanel) {
-        ctx.phasePanel = document.createElement("div"); ctx.phasePanel.className = "phase-panel";
-        const tip = document.createElement("div"); tip.className = "generating-tip";
-        tip.textContent = "生成进行中，全程约 2 分钟；此期间查询不可用。";
-        ctx.phasePanel.appendChild(tip); addNode(ctx.phasePanel);
-      }
+      ensurePhasePanel(ctx);
       const line = document.createElement("div"); line.className = "phase-line";
       line.innerHTML = `<span class="mark"></span><span class="step"></span><span class="detail"></span>`;
       const mark = line.querySelector(".mark");
@@ -339,6 +347,11 @@ function handleEvent(event, ctx) {
       line.querySelector(".step").textContent = event.step;
       line.querySelector(".detail").textContent = event.detail || "";
       ctx.phasePanel.appendChild(line); scrollBottom();
+      if (!event.ok) {
+        // 失败或取消：不再允许取消，按钮退场
+        const btn = ctx.phasePanel.querySelector(".cancel-btn");
+        if (btn) btn.remove();
+      }
       break;
     }
     case "done":
@@ -348,6 +361,76 @@ function handleEvent(event, ctx) {
       break;
   }
   return ctx;
+}
+
+function ensurePhasePanel(ctx) {
+  if (ctx.phasePanel) return;
+  ctx.phasePanel = document.createElement("div"); ctx.phasePanel.className = "phase-panel";
+  const head = document.createElement("div"); head.className = "phase-head";
+  const tip = document.createElement("div"); tip.className = "generating-tip";
+  tip.textContent = "生成进行中，全程约 2 分钟；此期间查询不可用。";
+  const btn = document.createElement("button"); btn.className = "cancel-btn"; btn.textContent = "取消生成";
+  btn.onclick = () => cancelGeneration(btn);
+  head.appendChild(tip); head.appendChild(btn);
+  ctx.phasePanel.appendChild(head); addNode(ctx.phasePanel);
+}
+
+async function cancelGeneration(btn) {
+  if (!confirm("确定取消本次生成？已完成步骤的产物会保留，需求不会上线。")) return;
+  btn.disabled = true;
+  try {
+    await api("POST", "/api/generate/cancel");
+    btn.textContent = "取消中…";
+    toast("取消请求已发出，将在当前步骤结束后停止");
+  } catch (e) {
+    btn.disabled = false;
+    toast(e.message);
+  }
+}
+
+function addFileLine(ctx, path) {
+  let block = ctx.phasePanel.querySelector(".file-block");
+  if (!block) {
+    block = document.createElement("div"); block.className = "sub-block file-block";
+    block.innerHTML = `<div class="sub-title">产物文件</div><div class="file-list"></div>`;
+    ctx.phasePanel.appendChild(block);
+    ctx.fileLines = [];
+  }
+  if (!ctx.fileLines) ctx.fileLines = [];
+  ctx.fileLines.push(path);
+  const list = block.querySelector(".file-list");
+  const LIMIT = 6;
+  if (ctx.fileLines.length <= LIMIT) {
+    const line = document.createElement("div"); line.textContent = "📄 " + path;
+    list.appendChild(line);
+  } else if (ctx.fileLines.length === LIMIT + 1) {
+    const more = document.createElement("div"); more.className = "more";
+    more.textContent = `…等 ${ctx.fileLines.length} 个文件，点击展开`;
+    more.onclick = () => {
+      list.innerHTML = "";
+      ctx.fileLines.forEach(p => { const d = document.createElement("div"); d.textContent = "📄 " + p; list.appendChild(d); });
+    };
+    list.appendChild(more);
+  } else {
+    const more = list.querySelector(".more");
+    if (more) more.textContent = `…等 ${ctx.fileLines.length} 个文件，点击展开`;
+  }
+  scrollBottom();
+}
+
+function addLogLine(ctx, text) {
+  let block = ctx.phasePanel.querySelector(".log-block");
+  if (!block) {
+    block = document.createElement("div"); block.className = "sub-block log-block";
+    block.innerHTML = `<div class="sub-title">编译 / 修复日志</div><div class="log-list"></div>`;
+    ctx.phasePanel.appendChild(block);
+  }
+  const list = block.querySelector(".log-list");
+  const line = document.createElement("div"); line.textContent = text;
+  list.appendChild(line);
+  while (list.children.length > 8) list.removeChild(list.firstChild);  // 只留尾部 8 条
+  list.scrollTop = list.scrollHeight;
+  scrollBottom();
 }
 
 function addThought(text) {

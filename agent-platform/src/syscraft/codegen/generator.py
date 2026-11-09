@@ -192,8 +192,10 @@ def collect_imports(fields: list[dict]) -> list[str]:
     return sorted(imports)
 
 
-def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: str) -> list[str]:
-    """渲染一个实体的六个文件，返回写出的相对路径（给验收清单的 suspects 用）。"""
+def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: str,
+                  on_file=None) -> list[str]:
+    """渲染一个实体的六个文件，返回写出的相对路径（给验收清单的 suspects 用）。
+    on_file(relative)：每写一个文件回调一次（对话式生成用它推 SSE file 事件）。"""
     name = entity["class_name"]
     fields = entity["_fields"]
     visible_fields = [f for f in fields if f.get("visibility") != "HIDDEN"]
@@ -231,6 +233,8 @@ def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: s
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(env.get_template(template_name).render(**context), encoding="utf-8")
         written.append(relative)
+        if on_file:
+            on_file(relative)
     return written
 
 
@@ -263,7 +267,9 @@ def _ensure_owner_field(entity: dict) -> None:
     })
 
 
-def generate(model_path: Path, project_root: Path) -> dict:
+def generate(model_path: Path, project_root: Path,
+             on_file=None) -> dict:
+    """on_file(relative_path)：每写一个产物文件回调一次（相对版本目录或项目根）。"""
     model_path = model_path.resolve()
     # 相对路径先落成绝对路径：下面要用 project_root.parent 去找同级骨架目录
     project_root = project_root.resolve()
@@ -289,11 +295,20 @@ def generate(model_path: Path, project_root: Path) -> dict:
 
     # ② 逐实体渲染六个文件
     generated_root = version_dir / "src/main/java/com/generated/generated"
+    # file 事件的路径语义统一为「相对版本目录」（产物文件）或「相对项目根」（脚本）——
+    # 前端展示与排查都按版本目录找文件
+    gen_prefix = "src/main/java/com/generated/generated"
+
+    def file_cb(relative: str) -> None:
+        if on_file:
+            on_file(f"{gen_prefix}/{relative}")
+
     written = {}
     for entity in model["entities"]:
         _ensure_owner_field(entity)
         entity["_fields"] = [prepare_field(f) for f in entity["fields"]]
-        written[entity["class_name"]] = render_entity(env, entity, generated_root, str(templates_dir))
+        written[entity["class_name"]] = render_entity(
+            env, entity, generated_root, str(templates_dir), on_file=file_cb)
 
     # ②b 行级归属元数据：SnapshotService 导出快照时合并 owner_field 到 adm_entity_snapshot。
     #    放生成物而不放模型文件——产物必须能脱离平台独立运行（契约 5 节第 4 条）
@@ -302,6 +317,8 @@ def generate(model_path: Path, project_root: Path) -> dict:
         owner_fields={e["entity"]: e["owner_field"] for e in model["entities"] if e.get("owner_field")},
     ), encoding="utf-8")
     written["GeneratedMetadata"] = [str(metadata_path.relative_to(version_dir))]
+    if on_file:
+        on_file(str(metadata_path.relative_to(version_dir)))
 
     # ③ DDL 与默认授权（结构快照由产物启动时自查导出）
     ddl_dir = workspace / "scripts" / "ddl"
@@ -321,6 +338,8 @@ def generate(model_path: Path, project_root: Path) -> dict:
             display_name=entity["display_name"], model_version=version,
         ), encoding="utf-8")
         ddl_files.append(str(ddl_path.relative_to(project_root)))
+        if on_file:
+            on_file(str(ddl_path.relative_to(project_root)))
 
         grants = [g for g in model.get("grants", []) if g["entity"] == entity["entity"]]
         # 结构快照不再由生成器写：产物启动时从 information_schema 自查导出，
@@ -330,6 +349,8 @@ def generate(model_path: Path, project_root: Path) -> dict:
             entity=entity["entity"], grants=grants, model_version=version,
         ), encoding="utf-8")
         grant_files.append(str(grants_path.relative_to(project_root)))
+        if on_file:
+            on_file(str(grants_path.relative_to(project_root)))
 
     # ④ 验收清单：与代码同源，放在 templates/acceptance 下（不放版本目录，避免随回滚丢失）
     acceptance = build_acceptance(model, written)
@@ -337,6 +358,8 @@ def generate(model_path: Path, project_root: Path) -> dict:
     acceptance_dir.mkdir(parents=True, exist_ok=True)
     acceptance_path = acceptance_dir / f"{version}.json"
     acceptance_path.write_text(json.dumps(acceptance, ensure_ascii=False, indent=2), encoding="utf-8")
+    if on_file:
+        on_file(str(acceptance_path.relative_to(project_root)))
 
     return {
         "version": version,

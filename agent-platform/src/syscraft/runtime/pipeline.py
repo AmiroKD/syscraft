@@ -31,6 +31,10 @@ from syscraft.runtime.acceptance import AcceptanceRunner
 HEALTH_TIMEOUT_SECONDS = 90
 
 
+class GenerationCancelled(RuntimeError):
+    """用户在步骤边界主动取消——不是故障，报告与对话回复都按取消语义呈现。"""
+
+
 @dataclass
 class StepResult:
     name: str
@@ -61,14 +65,23 @@ class PipelineResult:
 
 class Pipeline:
     def __init__(self, project_root: Path | None = None, port: int = 8080,
-                 *, notify=None, keep_running: bool = False):
+                 *, notify=None, keep_running: bool = False,
+                 should_cancel=None, on_event=None):
         """notify(name, ok, detail)：每步结束回调（对话式生成用它推 SSE 阶段事件）。
-        keep_running：验收成功后不关产物——对话式生成的终态是新版本直接上线。"""
+        keep_running：验收成功后不关产物——对话式生成的终态是新版本直接上线。
+        should_cancel()：步骤边界轮询的取消标志（对话式生成传 threading.Event.is_set）。
+        on_event(dict)：file/log 级原始事件回调（协议 3 节六种事件的后两种）。"""
         self.root = (project_root or config.PROJECT_ROOT).resolve()
         self.port = port
         self.process: subprocess.Popen | None = None
         self._notify = notify
         self._keep_running = keep_running
+        self._should_cancel = should_cancel
+        self._on_event = on_event
+
+    def _emit(self, event: dict) -> None:
+        if self._on_event:
+            self._on_event(event)
 
     # ------------------------------------------------------------------ ②生成
 
@@ -87,7 +100,9 @@ class Pipeline:
         result.record("① 停旧产物", True)
 
     def step_generate(self, model_path: Path, result: PipelineResult) -> Path:
-        info = generate(model_path, self.root)
+        info = generate(model_path, self.root,
+                        on_file=lambda relative: self._emit(
+                            {"type": "file", "path": relative, "action": "write"}))
         result.record("② 生成", True, f"版本 {info['version']}，{sum(len(v) for v in info['files'].values())} 个文件")
         return Path(info["version_dir"])
 
@@ -178,6 +193,9 @@ class Pipeline:
     # ------------------------------------------------------------------ ④编译
 
     def step_build(self, version_dir: Path, model_version: str, result: PipelineResult) -> None:
+        def log_event(source: str, text: str) -> None:
+            self._emit({"type": "log", "source": source, "text": text[-400:]})
+
         ok, output = _maven_build(version_dir)
         if ok:
             result.record("④ 编译", True)
@@ -186,9 +204,11 @@ class Pipeline:
         # 编译失败交修复循环：3 轮 × 15 步，成功即完成本步
         error_file = version_dir / "target/compile-errors.txt"
         error_file.write_text(output, encoding="utf-8")
+        log_event("maven", output)
         # 局部名不能用 repair——会遮蔽导入的修复函数（UnboundLocalError，实测踩过）
         repair_result = repair(version_dir, output,
-                               log_path=self.root / "workspace/repair" / f"{model_version}-pipeline.jsonl")
+                               log_path=self.root / "workspace/repair" / f"{model_version}-pipeline.jsonl",
+                               on_log=lambda text: log_event("repair", text))
         if repair_result.outcome == "SUCCESS":
             result.record("④ 编译（经修复循环）", True, f"{repair_result.steps_used} 步修复")
             return
@@ -289,18 +309,34 @@ class Pipeline:
 
         try:
             self.step_stop_stale(result)
+            # 以下每个步骤前都检查取消：步骤是边界——一旦进到 mvn/健康等待内部
+            # 就让它跑完当步，避免留下半编译的目录或半启的进程（取消只发生在边界）
+            self._check_cancel()
             version_dir = self.step_generate(model_path, result)
+            self._check_cancel()
             self.step_apply_ddl(version, model, result)
+            self._check_cancel()
             self.step_build(version_dir, version, result)
+            self._check_cancel()
             self.step_start(version_dir, result)
+            self._check_cancel()
             # 快照与授权都需要在线的 Spring：新产物启动后，快照导出、引导校验才放行
             self.step_upload_model(model_path, model, result)
             self.step_apply_grants(version, model, result)
+            self._check_cancel()
             report = self.step_acceptance(version, result)
             self.step_mark_current(version, result)
             result.ok = True
             summary = {"version": version, "ok": True, "steps": [s.__dict__ for s in result.steps],
                        "acceptance": report["summary"]}
+        except GenerationCancelled:
+            result.ok = False
+            result.failed_step = result.steps[-1].name if result.steps else "?"
+            result.error = "用户取消生成"
+            result.record("✕ 取消", False, "用户取消，已停止后续步骤")
+            summary = {"version": version, "ok": False, "failedStep": result.failed_step,
+                       "steps": [s.__dict__ for s in result.steps], "error": "用户取消生成",
+                       "cancelled": True}
         except Exception as error:
             result.ok = False
             result.failed_step = result.steps[-1].name if result.steps else "?"
@@ -308,7 +344,8 @@ class Pipeline:
             summary = {"version": version, "ok": False, "failedStep": result.failed_step,
                        "steps": [s.__dict__ for s in result.steps], "error": str(error)}
         finally:
-            # 对话式生成成功后不关产物：新版本直接上线承接业务对话（运行时 5 节）
+            # 对话式生成成功后不关产物：新版本直接上线承接业务对话（运行时 5 节）。
+            # 取消/失败都走这里停产物——已启动的进程不陪取消标志一起活着
             if not (self._keep_running and result.ok):
                 self.stop()
 
@@ -317,6 +354,10 @@ class Pipeline:
         report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\n结果：{'成功' if result.ok else '失败'}，报告：{report_path}")
         return result
+
+    def _check_cancel(self) -> None:
+        if self._should_cancel and self._should_cancel():
+            raise GenerationCancelled("用户取消生成")
 
     def stop(self) -> None:
         if self.process and self.process.poll() is None:

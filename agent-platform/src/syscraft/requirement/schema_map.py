@@ -42,6 +42,20 @@ class ModelValidationError(Exception):
         self.problems = problems
 
 
+def normalize(ir: dict) -> dict:
+    """LLM 输出键名方差归一化（fields→columns）。纯函数，validate/to_business_model 前调用。
+
+    键名协议必须闭环：prompt 里没明说列数组的键名，模型就会碰运气
+    （实测模型输出 fields、schema_map 只认 columns，全军报「字段数量 0」，
+    自修正清单里也不提键名，模型根本不知道要改什么）。两个键都有时以 columns 为准。"""
+    entities = []
+    for entity in ir.get("entities") or []:
+        if not entity.get("columns") and entity.get("fields"):
+            entity = {**entity, "columns": entity["fields"]}
+        entities.append(entity)
+    return {**ir, "entities": entities}
+
+
 def validate(ir: dict, existing_entities: set[str] | None = None) -> list[str]:
     """确定性校验，返回问题清单（空 = 通过）。"""
     problems: list[str] = []

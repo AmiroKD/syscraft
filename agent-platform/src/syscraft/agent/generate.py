@@ -19,6 +19,7 @@ import asyncio
 import json
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -39,6 +40,10 @@ CANCEL_PLAN = {"取消", "算了", "不生成", "不了", "取消生成", "先�
 class GenerationFlow:
     def __init__(self, client: SpringClient):
         self._client = client
+        # 全局生成锁意味着同一时刻至多一个生成在跑，一个取消标志就够。
+        # threading.Event 而非 asyncio.Event：pipeline.run 在 to_thread 线程里轮询它
+        self._cancel = threading.Event()
+        self._running_owner: int | None = None  # 当前生成的发起者（user id）
 
     def is_generation_intent(self, message: str) -> bool:
         return bool(GEN_INTENT.search(message or ""))
@@ -53,7 +58,7 @@ class GenerationFlow:
 
         if state == "running":
             session.append("user", "text", message)
-            return {"reply": "系统正在生成中（见下方进度），完成后会通知你。生成期间暂不支持取消。"}
+            return {"reply": "系统正在生成中（见下方进度），可点进度面板上的「取消生成」终止。"}
 
         if state == "awaiting_plan":
             session.append("user", "text", message)
@@ -127,6 +132,20 @@ class GenerationFlow:
                                              "assumptions": result.assumptions})
         return {"reply": reply}
 
+    # ---------------------------------------------------------------- 取消
+
+    def request_cancel(self, user_id: int, is_super_admin: bool) -> str | None:
+        """请求取消当前生成。返回 None 表示已受理，否则是拒绝原因。
+
+        取消权只给发起人或超管——生成是全局锁，但它占据的是发起者的需求，
+        无关者不该能射落别人的任务。"""
+        if self._running_owner is None:
+            return "当前没有进行中的生成"
+        if user_id != self._running_owner and not is_super_admin:
+            return "仅发起人或超管可取消生成"
+        self._cancel.set()
+        return None
+
     # ---------------------------------------------------------------- 流水线
 
     async def _run_pipeline(self, session, emit: Callable[[dict], None]) -> dict:
@@ -144,6 +163,13 @@ class GenerationFlow:
         reply = f"开始生成（版本 {version}），全程约 2 分钟，进度见下方事件。"
         session.append("assistant", "text", reply)
 
+        try:
+            me = session.meta().get("user_id")
+            self._running_owner = int(me) if me is not None else None
+        except (TypeError, ValueError):
+            self._running_owner = None
+        self._cancel.clear()
+
         async def task():
             try:
                 await self._stop_old_product(emit)
@@ -151,13 +177,17 @@ class GenerationFlow:
                 pipeline = Pipeline(
                     notify=lambda name, ok, detail: emit(
                         {"type": "phase", "step": name, "ok": ok, "detail": detail}),
-                    keep_running=True)
+                    keep_running=True,
+                    should_cancel=self._cancel.is_set,
+                    on_event=emit)
                 result = await asyncio.to_thread(pipeline.run, model_path)
                 if result.ok:
                     from syscraft.requirement.model_catalog import catalog
                     catalog.cache_clear()  # 新实体要让业务模式的工具白名单看见
                     passed = result.steps[-1].detail or "通过"
                     reply = f"生成完成：版本 {version} 已上线（自动验收 {passed}）。现在可以直接问我新系统里的数据了。"
+                elif result.error == "用户取消生成":
+                    reply = f"已取消生成（版本 {version}）。需求没有落地，产出的半成品留在 workspace 供检查。"
                 else:
                     reply = (f"生成失败于「{result.failed_step}」：{result.error[:260]}。"
                              "产物保留在 workspace/versions 供排查，需求没有上线。")
@@ -169,6 +199,8 @@ class GenerationFlow:
                 emit({"type": "error", "message": reply})
             finally:
                 generation_lock.release()
+                self._running_owner = None
+                self._cancel.clear()
                 session.set_slot("gen_state", None)
 
         asyncio.create_task(task())

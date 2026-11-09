@@ -34,7 +34,11 @@ class RepairResult:
 
 def repair(version_dir: Path, compile_errors: str, llm: RepairLLM | None = None,
            build_runner=None, log_path: Path | None = None,
-           max_turns: int = MAX_TURNS, max_steps: int = MAX_STEPS) -> RepairResult:
+           max_turns: int = MAX_TURNS, max_steps: int = MAX_STEPS,
+           on_log=None) -> RepairResult:
+    """on_log(text)：每步动作完成后的可读摘要（对话式生成用它推 SSE log 事件，
+    截断瘦身由调用方负责，这里给原文）。留痕 jsonl 不变——日志事件是展示层，
+    事件全量落盘才是审计层（6.9），两者不混。"""
     version_dir = version_dir.resolve()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     log_path = log_path or Path("workspace/repair") / f"{version_dir.name}-{stamp}.jsonl"
@@ -44,6 +48,11 @@ def repair(version_dir: Path, compile_errors: str, llm: RepairLLM | None = None,
     breaker = CircuitBreaker(version_dir)
 
     log.append("CompileFailed", errors=compile_errors)
+
+    def report(text: str) -> None:
+        if on_log:
+            on_log(text)
+
     steps_used = 0
     for turn in range(1, max_turns + 1):
         for step in range(1, max_steps + 1):
@@ -55,6 +64,7 @@ def repair(version_dir: Path, compile_errors: str, llm: RepairLLM | None = None,
             except Exception as error:
                 # 模型两次都给不出合法动作：记失败事件，这一步作废继续走完 turn
                 log.append("LLMError", error=str(error)[:300], ok=False)
+                report(f"[轮{turn}步{step}] 模型动作解析失败：{str(error)[:120]}")
                 continue
 
             result = tools.run(action)
@@ -65,6 +75,7 @@ def repair(version_dir: Path, compile_errors: str, llm: RepairLLM | None = None,
                        brief=result.get("brief"), error=result.get("error"),
                        diff=result.get("diff"), output=(result.get("output") or "")[:1200]
                        if event_type == "Build" else None)
+            report(_step_brief(turn, step, action, result))
 
             if action.get("tool") == "run_build":
                 if result.get("ok"):
@@ -79,14 +90,27 @@ def repair(version_dir: Path, compile_errors: str, llm: RepairLLM | None = None,
             reason = breaker.check()
             if reason:
                 log.append("CircuitBreak", reason=reason, ok=False)
+                report(f"[轮{turn}步{step}] 熙断：{reason}")
                 return RepairResult("ABORT", reason, turn, steps_used, log_path)
 
         reason = breaker.record_turn_end(_last_build_errors(log))
         if reason:
             log.append("CircuitBreak", reason=reason, ok=False)
+            report(f"[轮{turn}] 熙断：{reason}")
             return RepairResult("ABORT", reason, turn, steps_used, log_path)
 
     return RepairResult("ABORT", f"{max_turns} 轮用尽仍未编译通过", max_turns, steps_used, log_path)
+
+
+def _step_brief(turn: int, step: int, action: dict, result: dict) -> str:
+    """一步动作的可读摘要（SSE log 事件用；输出超长截尾部）。"""
+    tool = action.get("tool", "?")
+    ok = result.get("ok", False)
+    head = f"[轮{turn}步{step}] {tool} {'✓' if ok else '✗'}"
+    detail = result.get("brief") or result.get("error") or result.get("output") or ""
+    if tool == "run_build" and result.get("output"):
+        detail = result["output"][-300:]
+    return f"{head} {str(detail)[:300]}".rstrip()
 
 
 def _last_build_errors(log: EventLog) -> str:

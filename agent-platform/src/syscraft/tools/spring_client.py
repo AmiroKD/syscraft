@@ -29,12 +29,16 @@ class SpringClient:
         self._timeout = timeout or config.SPRING_TIMEOUT_SECONDS
 
     async def _post(self, path: str, payload: dict, token: str | None) -> dict[str, Any]:
+        return await self._request("POST", path, payload, token)
+
+    async def _request(self, method: str, path: str, payload: dict | None,
+                       token: str | None) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:
             async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-                response = await client.post(path, json=payload, headers=headers)
+                response = await client.request(method, path, json=payload, headers=headers)
         except httpx.HTTPError as error:
             # 产物没起来时给一句人话，而不是让 httpx 的堆栈冒到前端
             raise SpringError(503, None, f"产物服务不可达：{error}") from error
@@ -52,6 +56,11 @@ class SpringClient:
         body = await self._post("/api/auth/login", {"username": username, "password": password}, None)
         return body["data"]
 
+    async def me(self, token: str) -> dict[str, Any]:
+        """当前用户（含 id）。会话绑定、身份展示都从这里取——平台不自己解析令牌。"""
+        body = await self._request("GET", "/api/auth/me", None, token)
+        return body["data"]
+
     async def query(self, entity: str, request: dict, token: str) -> dict[str, Any]:
         body = await self._post(f"/api/biz/{entity}/query", request, token)
         return body["data"]
@@ -63,6 +72,14 @@ class SpringClient:
     async def preview_delete(self, entity: str, ids: list[int], token: str) -> dict[str, Any]:
         """删除预告：拿确认令牌与影响行数，不执行任何删除。"""
         body = await self._post("/api/confirm/preview", {"entity": entity, "ids": ids}, token)
+        return body["data"]
+
+    async def insert(self, entity: str, row: dict, token: str) -> int:
+        body = await self._post(f"/api/biz/{entity}/insert", row, token)
+        return body["data"]
+
+    async def update(self, entity: str, record: dict, token: str) -> int:
+        body = await self._post(f"/api/biz/{entity}/update", record, token)
         return body["data"]
 
     async def delete(self, entity: str, ids: list[int], confirm_token: str, token: str) -> int:

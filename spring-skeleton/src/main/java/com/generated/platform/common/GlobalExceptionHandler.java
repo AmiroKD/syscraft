@@ -1,6 +1,8 @@
 package com.generated.platform.common;
 
 import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotPermissionException;
+import cn.dev33.satoken.exception.NotRoleException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -43,6 +45,22 @@ public class GlobalExceptionHandler {
         };
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new ApiResponse<>(HttpStatus.UNAUTHORIZED.value(), msg, null));
+    }
+
+    /**
+     * 已登录但没有该权限码。403 与上面的 401 必须分开：
+     * 前端对 401 的处理是跳登录页，对 403 的处理是提示「无权操作」并留在原地。
+     */
+    @ExceptionHandler(NotPermissionException.class)
+    public ResponseEntity<ApiResponse<Void>> onNoPermission(NotPermissionException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.fail(ErrorCode.FORBIDDEN, "无此操作权限：" + e.getPermission()));
+    }
+
+    @ExceptionHandler(NotRoleException.class)
+    public ResponseEntity<ApiResponse<Void>> onNoRole(NotRoleException e) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiResponse.fail(ErrorCode.FORBIDDEN, "无此角色：" + e.getRole()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

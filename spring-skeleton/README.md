@@ -38,3 +38,19 @@ curl -s localhost:8080/api/auth/me -H "Authorization: Bearer $TOKEN"
 
 当前只连 `adm` 库；`biz` 数据源要等第一张业务表随模板生成后才需要，届时两个 DataSource 都要显式声明并指定 `@Primary`。
 
+## 权限码探针（第 3 步验收用）
+
+真实业务 Controller 要等模板生成才出现，所以第 3 步先用 `PermissionProbeController` 证明矩阵生效。
+它只在 `probe` profile 下加载，正常启动不会注册这两个端点：
+
+```bash
+env -u SERVER__PORT java -jar target/syscraft-skeleton-0.1.0.jar \
+  --server.port=8080 --spring.profiles.active=probe
+
+# 同一端点，有授权 200、无授权 403
+curl -s -w ' %{http_code}\n' localhost:8080/api/probe/order/read -H "Authorization: Bearer $TOKEN"
+```
+
+第 4 步真实 Controller 落地后删除 `com.generated.platform.probe` 整个包。
+
+

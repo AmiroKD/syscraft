@@ -272,7 +272,9 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
     sid = session.id
     reconnecting = after_seq > 0
 
-    if _hub.is_active(sid):
+    # 会话忙碌的判定 = hub 运行中 或 生成流水线尾部仍在跑（生成流 dispatch 提前返回，
+    # hub 状态已被收殓，只剩 gen_state 槽位能说明还有事件会来）
+    if _hub.is_active(sid) or session.get_slot("gen_state") == "running":
         if not reconnecting:
             return JSONResponse(status_code=409, content=envelope(None, "该会话有任务进行中，请等待完成", 409))
     elif reconnecting:
@@ -298,38 +300,50 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
             await _agent.run(payload.message, token, session, on_event=emit)
         except Exception as error:  # noqa: BLE001 任何异常都要变成流里的事件而不是悬空连接
             emit({"type": "error", "message": f"处理失败：{error}"})
+        finally:
+            # 收殓归 dispatch 生命周期而不是连接生命周期（审查 r5①）：
+            # 客户端连接断光也不会留下「running」僵尸卡死会话；
+            # 重连连接只读不收殓，拆不掉别人的运行守卫、不会注入提前 done
+            _hub.finish(sid)
 
     task = None if reconnecting else asyncio.create_task(dispatch())
 
-    async def follow():
-        last = after_seq
-        while True:
-            events = _hub.replay(sid, last)
-            for event in events:
-                last = event["seq"]
-                yield event
-            dispatch_done = task is None or task.done()
-            gen_running = session.get_slot("gen_state") == "running"
-            if dispatch_done and not gen_running:
-                if events:
-                    continue  # 再排一轮，确认没有残余
-                break
-            if not events:
-                await asyncio.sleep(0.15)
-
-        if task is not None and task.done() and task.exception() is not None:
-            yield {"type": "error", "message": str(task.exception())}
-        _hub.finish(sid)
-        seq = _hub.emit(sid, {"type": "done", "sessionId": sid})
-        final = {"type": "done", "sessionId": sid, "seq": seq}
-        yield final
-
     async def sse():
-        async for event in follow():
+        async for event in _follow_events(sid, session, _hub, task, after_seq):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(sse(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+async def _follow_events(sid: str, session, hub: StreamHub, task, after_seq: int):
+    """事件跟随循环：新消息连接与断线重连共用。
+
+    - 完成判定：本连接持有 dispatch 任务就看 task.done()；重连连接（task=None）
+      看 hub 状态是否已收殓——收殓在 dispatch 的 finally，与连接生死无关。
+    - 生成流的 dispatch 提前返回后，靠 gen_state 槽位继续跟到流水线尾部收尾。
+    - 退出时向本客户端发 done（各连接自持一份，done 不落 hub 日志）。"""
+    last = after_seq
+    while True:
+        events = hub.replay(sid, last)
+        for event in events:
+            last = event["seq"]
+            yield event
+        gen_running = session.get_slot("gen_state") == "running"
+        if task is not None:
+            dispatch_done = task.done()
+        else:
+            dispatch_done = hub.status(sid) != "running"
+        if dispatch_done and not gen_running:
+            if events:
+                continue  # 再排一轮，确认没有残余
+            break
+        if not events:
+            await asyncio.sleep(0.15)
+
+    if task is not None and task.done() and task.exception() is not None:
+        yield {"type": "error", "message": str(task.exception())}
+    yield {"type": "done", "sessionId": sid}
 
 
 # ---- 会话管理（《会话与上下文策略》4 节：列表 / 历史 / 重命名 / 删除）----

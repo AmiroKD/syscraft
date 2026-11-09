@@ -181,3 +181,19 @@ def test_positive_number_semantic_gets_deterministic_constraint():
     constraints = model["entities"][0]["rules"]["constraints"]
     assert constraints == [{"field": "quantity", "op": "GT", "value": 0,
                             "message": "本次入库的商品数量，必须为正数（来自字段语义推断）"}]
+
+
+def test_existing_entities_injected_into_prompt():
+    """已有实体清单必须进 prompt（审查 r5）：只靠校验报错自修正，
+    模型第一轮必撞重名墙，白白多烧一轮 LLM 调用。"""
+    captured = {}
+
+    def llm_call(messages):
+        captured["system"] = messages[0]["content"]
+        return json.dumps(IR_INVENTORY)
+
+    result = RequirementExtractor(llm_call=llm_call,
+                                  existing_entities={"trade_order", "memo"}).extract("库存管理")
+    assert result.model is not None
+    assert "trade_order" in captured["system"]
+    assert "memo" in captured["system"]

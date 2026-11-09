@@ -28,6 +28,7 @@ EXTRACT_PROMPT_TEMPLATE = """你是业务系统的需求分析师。从用户需
 
 实体名/字段名：小写字母开头，小写字母/数字/下划线，不能用数据库保留字（如 order/user）。
 中文名放 displayName 与 semantic。表名不能用 adm_ 前缀。
+{entities}
 每个实体的列里不要放 id 和 created_at（系统自动注入）。
 一对多用子表外键列表达（如 order_item.product_id），并在 relations 里声明：
 {"from":"order_item.product_id","to":"product.id","type":"MANY_TO_ONE"}
@@ -168,13 +169,15 @@ class RequirementExtractor:
     # ------------------------------------------------------------------ 内部
 
     def _messages(self, requirement: str, answers: list[str]) -> list[dict]:
-        # str.format 会把 JSON 花括号当占位符，所以手动替换
+        # str.format 会把 JSON 花括号当占位符，所以手动替换。
+        # 已有实体清单必须在 prompt 里告诉模型（审查 r5）：只靠校验报错自修正，
+        # 模型第一轮必撞重名墙，白白多烧一轮 LLM 调用
         entities = self._existing_desc()
         answers_block = "\n".join(f"- {answer}" for answer in answers) or "（无）"
         system = (EXTRACT_PROMPT_TEMPLATE
+                  .replace("{entities}", entities)  # 先替换固定占位符，防需求文本伪造占位符
                   .replace("{answers}", answers_block)
-                  .replace("{requirement}", requirement)
-                  .replace("{entities}", entities))
+                  .replace("{requirement}", requirement))
         return [{"role": "system", "content": system},
                 {"role": "user", "content": requirement}]
 

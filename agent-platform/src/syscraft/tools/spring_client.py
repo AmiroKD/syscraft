@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import httpx
@@ -24,24 +25,43 @@ class SpringError(Exception):
 
 
 class SpringClient:
-    def __init__(self, base_url: str | None = None, timeout: float | None = None):
+    def __init__(self, base_url: str | None = None, timeout: float | None = None,
+                 transport: httpx.AsyncBaseTransport | None = None):
         self._base_url = base_url or config.SPRING_BASE_URL
         self._timeout = timeout or config.SPRING_TIMEOUT_SECONDS
+        self._transport = transport  # 测试注入（httpx.MockTransport）
 
-    async def _post(self, path: str, payload: dict, token: str | None) -> dict[str, Any]:
-        return await self._request("POST", path, payload, token)
+    async def _post(self, path: str, payload: dict, token: str | None,
+                    request_id: str | None = None) -> dict[str, Any]:
+        return await self._request("POST", path, payload, token, request_id=request_id)
 
     async def _request(self, method: str, path: str, payload: dict | None,
-                       token: str | None) -> dict[str, Any]:
+                       token: str | None, request_id: str | None = None) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        try:
-            async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-                response = await client.request(method, path, json=payload, headers=headers)
-        except httpx.HTTPError as error:
-            # 产物没起来时给一句人话，而不是让 httpx 的堆栈冒到前端
-            raise SpringError(503, None, f"产物服务不可达：{error}") from error
+        if request_id:
+            headers["X-Request-Id"] = request_id
+        # 写操作（带幂等键）超时后重试一次：超时 ≠ 失败，请求可能已到达产物，
+        # 不重试的话上层（模型/用户）重发就是双插——这正是 DedupFilter 要接的场景。
+        # 幂等键在重试间保持不变，产物侧命中回放，不会写第二次（审查 r5 P2）
+        attempts = 2 if request_id else 1
+        for attempt in range(attempts):
+            try:
+                async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout,
+                                             transport=self._transport) as client:
+                    response = await client.request(method, path, json=payload, headers=headers)
+                break
+            except httpx.TimeoutException as error:
+                if request_id is None or attempt + 1 >= attempts:
+                    # 读操作（无幂等键）或已重试过：超时按失败上抛。
+                    # 注意保持 503：_identity 只兜底 502/503 的「产物不在线」
+                    detail = (f"产物服务响应超时（已携幂等键重试一次）：{error}"
+                              if request_id else f"产物服务响应超时：{error}")
+                    raise SpringError(503, None, detail) from error
+            except httpx.HTTPError as error:
+                # 产物没起来时给一句人话，而不是让 httpx 的堆栈冒到前端
+                raise SpringError(503, None, f"产物服务不可达：{error}") from error
 
         try:
             body = response.json()
@@ -75,17 +95,19 @@ class SpringClient:
         return body["data"]
 
     async def insert(self, entity: str, row: dict, token: str) -> int:
-        body = await self._post(f"/api/biz/{entity}/insert", row, token)
+        body = await self._post(f"/api/biz/{entity}/insert", row, token,
+                                request_id=uuid.uuid4().hex)
         return body["data"]
 
     async def update(self, entity: str, record: dict, token: str) -> int:
-        body = await self._post(f"/api/biz/{entity}/update", record, token)
+        body = await self._post(f"/api/biz/{entity}/update", record, token,
+                                request_id=uuid.uuid4().hex)
         return body["data"]
 
     async def delete(self, entity: str, ids: list[int], confirm_token: str, token: str) -> int:
         body = await self._post(
             f"/api/biz/{entity}/delete",
             {"ids": ids, "confirmToken": confirm_token},
-            token,
+            token, request_id=uuid.uuid4().hex,
         )
         return body["data"]

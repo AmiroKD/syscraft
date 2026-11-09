@@ -64,7 +64,6 @@ class GenerationFlow:
         state = session.get_slot("gen_state") or "idle"
 
         if state == "running":
-            session.append("user", "text", message)
             # 生成锁才是运行的唯一真相：平台重启后锁随进程消失，
             # 但 gen_state 槽位持久化在 SQLite——不复位的话用户永远卡在「生成中」
             from syscraft.conversation.stream_hub import generation_lock
@@ -72,7 +71,10 @@ class GenerationFlow:
                 session.set_slot("gen_state", None)
                 self._running_owner = None
                 self._cancel.clear()
+                # 注意不在这里落盘用户消息：复位后走 idle/业务路径，各自的
+                # 落盘点只此一次（审查 r5：先落盘再 fall-through 会双写历史）
             else:
+                session.append("user", "text", message)
                 return {"reply": "系统正在生成中（见下方进度），可点进度面板上的「取消生成」终止。"}
 
         if state == "awaiting_plan":

@@ -73,32 +73,36 @@ def main() -> int:
     print(f"灌入 {args.rows} 行…")
     seed(args.rows)
 
-    token = httpx.post(f"{BASE}/api/auth/login", json={
-        "username": os.environ["ADMIN_USER"], "password": os.environ["ADMIN_INIT_PWD"],
-    }, timeout=5).json()["data"]["token"]
+    # 压测数据用完即清（审查 r5 实测：measure 半路炸掉会把万行 PERF 残留
+    # 留在 biz 库——清理必须放 finally，与测量成败无关）
+    try:
+        token = httpx.post(f"{BASE}/api/auth/login", json={
+            "username": os.environ["ADMIN_USER"], "password": os.environ["ADMIN_INIT_PWD"],
+        }, timeout=5).json()["data"]["token"]
 
-    results = [
-        measure(token, "无条件分页 size=20", {"page": 1, "size": 20}, args.rounds),
-        measure(token, "无条件分页 size=100", {"page": 1, "size": 100}, args.rounds),
-        measure(token, "EQ 过滤 size=20",
-                {"page": 1, "size": 20,
-                 "filter": {"op": "AND",
-                            "conditions": [{"field": "status", "operator": "EQ", "value": "PAID"}]}},
-                args.rounds),
-        measure(token, "LIKE 过滤 size=20",
-                {"page": 1, "size": 20,
-                 "filter": {"op": "AND",
-                            "conditions": [{"field": "customer", "operator": "LIKE", "value": "压测客户1%"}]}},
-                args.rounds),
-    ]
+        results = [
+            measure(token, "无条件分页 size=20", {"page": 1, "size": 20}, args.rounds),
+            measure(token, "无条件分页 size=100", {"page": 1, "size": 100}, args.rounds),
+            measure(token, "EQ 过滤 size=20",
+                    {"page": 1, "size": 20,
+                     "filter": {"op": "AND",
+                                "conditions": [{"field": "status", "operator": "EQ", "value": "PAID"}]}},
+                    args.rounds),
+            measure(token, "LIKE 过滤 size=20",
+                    {"page": 1, "size": 20,
+                     "filter": {"op": "AND",
+                                "conditions": [{"field": "customer", "operator": "LIKE", "value": "压测客户1%"}]}},
+                    args.rounds),
+        ]
+    finally:
+        seed(0)
+        print("压测数据已清理")
 
     print(f"\n数据量 {args.rows} 行，每项 {args.rounds} 次（毫秒）：")
     for row in results:
         print(f"  {row['label']:<18} P50={row['p50']:>7}  P95={row['p95']:>7}  P99={row['p99']:>7}")
 
-    # 数据用完即清：性能数据不留在演示环境
-    seed(0)
-    print("压测数据已清理")
+    # 数据用完即清：性能数据不留在演示环境（finally 里已清）
 
     target = results[0]["p95"]
     ok = target < 500

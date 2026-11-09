@@ -134,6 +134,9 @@ let me = null;
 let sessionId = sessionStorage.getItem("sessionId") || null;
 let lastSeq = 0;            // 本轮已收到的最大事件序号，断线重连用它
 let busy = false;           // 一轮交互进行中（含生成）
+let streamSessionId = null; // 当前流所属的会话（重连请求体用它，不跟全局视图走）
+let activePanel = null;     // 生成进度面板（跨断线重连复用，避免重建第二块）
+let activeFileLines = null; // 面板里的产物文件清单
 
 /* ---------------- 基础请求 ---------------- */
 async function api(method, path, body) {
@@ -191,6 +194,7 @@ async function loadSessions() {
     item.querySelector(".del").onclick = async (ev) => {
       ev.stopPropagation();
       if (!confirm("删除会话「" + s.title + "」？记录不可恢复。")) return;
+      if (busy) { toast("有任务进行中，完成后再删除会话"); return; }
       await api("DELETE", "/api/sessions/" + s.sessionId);
       if (sessionId === s.sessionId) { sessionId = null; $("messages").innerHTML = ""; }
       loadSessions();
@@ -205,11 +209,14 @@ $("newSession").onclick = () => {
   addBubble("user", "（新会话：查询数据，或直接描述一个要生成的系统）");
 };
 
+function detachPanel() {
+  /* 进度面板是会话视图的一部分：切走再切回，旧 DOM 已被清空，引用必须作废 */
+  activePanel = null; activeFileLines = null;
+}
+
 async function openSession(id) {
   sessionId = id; sessionStorage.setItem("sessionId", id);
   document.querySelectorAll(".session-item").forEach(el => el.classList.remove("active"));
-  [...document.querySelectorAll(".session-item")].find(el =>
-    el.querySelector(".title").onclick === undefined) ; // 样式在 loadSessions 里刷新
   const data = await api("GET", `/api/sessions/${id}/messages`);
   $("messages").innerHTML = "";
   for (const m of data.messages) renderMessage(m.role, m.type, m.content);
@@ -277,17 +284,20 @@ async function send(text) {
   if (!message || busy) return;
   $("input").value = "";
   addBubble("user", message);
+  streamSessionId = sessionId;   // 本轮流属于哪个会话，从这里定，不跟视图切换走
+  detachPanel();
   await streamChat(message, 0, 0);
 }
 
 async function streamChat(message, attempt, afterSeq) {
   busy = true; setSendDisabled(true);
-  let phasePanel = null, phaseLines = {};
   try {
     const res = await fetch("/api/chat/stream?after_seq=" + afterSeq, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-      body: JSON.stringify({ message, session_id: sessionId }),
+      // 重连也必须发给流自己的会话：busy 期间用户可能切到了别的会话，
+      // 用全局 sessionId 会把 A 的消息灌进 B（审查 r5②）
+      body: JSON.stringify({ message, session_id: streamSessionId }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -310,39 +320,41 @@ async function streamChat(message, attempt, afterSeq) {
         if (!line) continue;
         const event = JSON.parse(line.slice(6));
         lastSeq = Math.max(lastSeq, event.seq || 0);
-        if (!event.sessionId && sessionId === null) {} // 新会话 id 从 done 事件取
-        const outcome = handleEvent(event, { phasePanel, phaseLines });
-        phasePanel = outcome.phasePanel || phasePanel;
-        phaseLines = outcome.phaseLines || phaseLines;
+        handleEvent(event);
       }
     }
   } catch (err) {
     // 断线续传（设计 6.2）：不重发请求，带 seq 重连补发缺失事件
     if (attempt < 3) {
-      addThought("连接中断，正在续传…");
+      if (sessionId === streamSessionId) addThought("连接中断，正在续传…");
       await new Promise(r => setTimeout(r, 800));
       return await streamChat(message, attempt + 1, lastSeq);
     }
-    addBubble("assistant", "连接中断且续传失败，请刷新页面查看历史。", true);
+    if (sessionId === streamSessionId)
+      addBubble("assistant", "连接中断且续传失败，请刷新页面查看历史。", true);
   } finally {
     busy = false; setSendDisabled(false);
-    if (sessionId === null) { /* done 事件里可能带来了新会话 id */ }
   }
 }
 
-function handleEvent(event, ctx) {
+function handleEvent(event) {
+  /* 串台守卫（审查 r5②）：流的事件只渲染进流所属会话的视图。
+     用户 busy 期间切到别的会话时，事件已落服务端会话历史，切回可见；
+     sessionId 回填（新会话首轮从 done 拿 id）不受视图影响。 */
+  const viewing = sessionId === streamSessionId;
   switch (event.type) {
-    case "thought": addThought(event.text); break;
-    case "tool_result": if (!event.ok) addThought("工具调用失败"); break;
-    case "table": renderTable(event.table); break;
-    case "text": addBubble("assistant", event.text); break;
-    case "confirm": renderConfirm(event.summary || event.text); break;
-    case "error": addBubble("assistant", event.message, true); break;
-    case "file": ensurePhasePanel(ctx); addFileLine(ctx, event.path); break;
-    case "log": ensurePhasePanel(ctx); addLogLine(ctx, event.text); break;
-    case "capability": renderCapabilityCard(event); break;
+    case "thought": if (viewing) addThought(event.text); break;
+    case "tool_result": if (viewing && !event.ok) addThought("工具调用失败"); break;
+    case "table": if (viewing) renderTable(event.table); break;
+    case "text": if (viewing) addBubble("assistant", event.text); break;
+    case "confirm": if (viewing) renderConfirm(event.summary || event.text); break;
+    case "error": if (viewing) addBubble("assistant", event.message, true); break;
+    case "file": if (viewing) { ensurePhasePanel(); addFileLine(event.path); } break;
+    case "log": if (viewing) { ensurePhasePanel(); addLogLine(event.text); } break;
+    case "capability": if (viewing) renderCapabilityCard(event); break;
     case "phase": {
-      ensurePhasePanel(ctx);
+      if (!viewing) break;
+      ensurePhasePanel();
       const line = document.createElement("div"); line.className = "phase-line";
       line.innerHTML = `<span class="mark"></span><span class="step"></span><span class="detail"></span>`;
       const mark = line.querySelector(".mark");
@@ -350,33 +362,36 @@ function handleEvent(event, ctx) {
       mark.className = "mark " + (event.ok ? "ok" : "fail");
       line.querySelector(".step").textContent = event.step;
       line.querySelector(".detail").textContent = event.detail || "";
-      ctx.phasePanel.appendChild(line); scrollBottom();
+      activePanel.appendChild(line); scrollBottom();
       if (!event.ok) {
         // 失败或取消：不再允许取消，按钮退场
-        const btn = ctx.phasePanel.querySelector(".cancel-btn");
+        const btn = activePanel.querySelector(".cancel-btn");
         if (btn) btn.remove();
       }
       break;
     }
     case "done":
-      if (event.sessionId && event.sessionId !== sessionId) {
+      // 只在还没有会话 id（新会话首轮）时采纳流的归属；
+      // 用户已切到别的会话时不劫持当前视图
+      if (event.sessionId && sessionId === null && event.sessionId === streamSessionId) {
         sessionId = event.sessionId; sessionStorage.setItem("sessionId", sessionId); loadSessions();
       }
       break;
   }
-  return ctx;
 }
 
-function ensurePhasePanel(ctx) {
-  if (ctx.phasePanel) return;
-  ctx.phasePanel = document.createElement("div"); ctx.phasePanel.className = "phase-panel";
+function ensurePhasePanel() {
+  /* 面板跨断线重连复用（审查 r5③）：重连只是重新拉流，不是新一轮交互，
+     重建面板会在旧面板下面叠出第二块 */
+  if (activePanel) return;
+  activePanel = document.createElement("div"); activePanel.className = "phase-panel";
   const head = document.createElement("div"); head.className = "phase-head";
   const tip = document.createElement("div"); tip.className = "generating-tip";
   tip.textContent = "生成进行中，全程约 2 分钟；此期间查询不可用。";
   const btn = document.createElement("button"); btn.className = "cancel-btn"; btn.textContent = "取消生成";
   btn.onclick = () => cancelGeneration(btn);
   head.appendChild(tip); head.appendChild(btn);
-  ctx.phasePanel.appendChild(head); addNode(ctx.phasePanel);
+  activePanel.appendChild(head); addNode(activePanel);
 }
 
 async function cancelGeneration(btn) {
@@ -392,42 +407,42 @@ async function cancelGeneration(btn) {
   }
 }
 
-function addFileLine(ctx, path) {
-  let block = ctx.phasePanel.querySelector(".file-block");
+function addFileLine(path) {
+  let block = activePanel.querySelector(".file-block");
   if (!block) {
     block = document.createElement("div"); block.className = "sub-block file-block";
     block.innerHTML = `<div class="sub-title">产物文件</div><div class="file-list"></div>`;
-    ctx.phasePanel.appendChild(block);
-    ctx.fileLines = [];
+    activePanel.appendChild(block);
+    activeFileLines = [];
   }
-  if (!ctx.fileLines) ctx.fileLines = [];
-  ctx.fileLines.push(path);
+  if (!activeFileLines) activeFileLines = [];
+  activeFileLines.push(path);
   const list = block.querySelector(".file-list");
   const LIMIT = 6;
-  if (ctx.fileLines.length <= LIMIT) {
+  if (activeFileLines.length <= LIMIT) {
     const line = document.createElement("div"); line.textContent = "📄 " + path;
     list.appendChild(line);
-  } else if (ctx.fileLines.length === LIMIT + 1) {
+  } else if (activeFileLines.length === LIMIT + 1) {
     const more = document.createElement("div"); more.className = "more";
-    more.textContent = `…等 ${ctx.fileLines.length} 个文件，点击展开`;
+    more.textContent = `…等 ${activeFileLines.length} 个文件，点击展开`;
     more.onclick = () => {
       list.innerHTML = "";
-      ctx.fileLines.forEach(p => { const d = document.createElement("div"); d.textContent = "📄 " + p; list.appendChild(d); });
+      activeFileLines.forEach(p => { const d = document.createElement("div"); d.textContent = "📄 " + p; list.appendChild(d); });
     };
     list.appendChild(more);
   } else {
     const more = list.querySelector(".more");
-    if (more) more.textContent = `…等 ${ctx.fileLines.length} 个文件，点击展开`;
+    if (more) more.textContent = `…等 ${activeFileLines.length} 个文件，点击展开`;
   }
   scrollBottom();
 }
 
-function addLogLine(ctx, text) {
-  let block = ctx.phasePanel.querySelector(".log-block");
+function addLogLine(text) {
+  let block = activePanel.querySelector(".log-block");
   if (!block) {
     block = document.createElement("div"); block.className = "sub-block log-block";
     block.innerHTML = `<div class="sub-title">编译 / 修复日志</div><div class="log-list"></div>`;
-    ctx.phasePanel.appendChild(block);
+    activePanel.appendChild(block);
   }
   const list = block.querySelector(".log-list");
   const line = document.createElement("div"); line.textContent = text;

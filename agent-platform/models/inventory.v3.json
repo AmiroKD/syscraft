@@ -1,0 +1,219 @@
+{
+  "model_version": "v3",
+  "entities": [
+    {
+      "entity": "product",
+      "class_name": "Product",
+      "display_name": "商品",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "商品名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 128
+        },
+        {
+          "column": "spec",
+          "property": "spec",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "商品规格型号，如 500ml/瓶",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 128
+        },
+        {
+          "column": "unit_price",
+          "property": "unitPrice",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "商品单价（元）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "precision": 12,
+          "scale": 2
+        },
+        {
+          "column": "stock_qty",
+          "property": "stockQty",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "当前库存数量，由入库/出库业务累计维护",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "warn_threshold",
+          "property": "warnThreshold",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "库存低于该值时触发预警",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "stock_in",
+      "class_name": "StockIn",
+      "display_name": "入库单",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "code",
+          "property": "code",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "入库单编号，业务唯一",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 64
+        },
+        {
+          "column": "operator",
+          "property": "operator",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "办理入库的人员姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 64
+        },
+        {
+          "column": "qty",
+          "property": "qty",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "本次入库的商品数量，必须为正数",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "in_date",
+          "property": "inDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "入库发生日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "product_id",
+          "property": "productId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属商品，关联 product.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [
+          {
+            "field": "qty",
+            "op": "GT",
+            "value": 0,
+            "message": "本次入库的商品数量，必须为正数（来自字段语义推断）"
+          }
+        ],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "product",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "stock_in",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "每张入库单只对应一个商品，因此入库数量直接放在 stock_in 上，不拆入库单明细表。",
+    "入库单保存后，商品库存数量应增加对应的入库数量；该跨表累加逻辑不在本模型规则中表达，由入库业务事务实现。",
+    "入库单的入库日期默认取当前日期，可手工调整；入库单编号由业务或系统生成且保持唯一。",
+    "单价按含税销售单价存储，不做税率拆分。",
+    "stock_qty 与 warn_threshold 均不允许为负；当 stock_qty 小于 warn_threshold 时由查询或页面提示预警，预警动作不在规则中表达。",
+    "入库单不做状态流转（提交即生效），若后续需要审批再补充状态机。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

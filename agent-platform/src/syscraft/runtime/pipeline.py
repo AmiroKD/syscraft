@@ -66,7 +66,7 @@ class Pipeline:
 
     # ------------------------------------------------------------------ ③建表
 
-    def step_apply_ddl(self, version: str, result: PipelineResult) -> None:
+    def step_apply_ddl(self, version: str, model: dict, result: PipelineResult) -> None:
         ddl_dir = self.root / "workspace/scripts/ddl"
         scripts = sorted(ddl_dir.glob(f"{version}_*.sql"))
         connection = pymysql.connect(
@@ -82,6 +82,23 @@ class Pipeline:
                         cursor.execute(statement)
                         applied += 1
             connection.commit()
+
+            # 表结构漂移检测：CREATE TABLE IF NOT EXISTS 对已存在的表不生效，
+            # 而 LLM 每次抽取的字段名有方差（实测：price → unit_price）。
+            # 不查就会「编译通过、运行 500」，必须在这里把漂移暴露出来。
+            with connection.cursor() as cursor:
+                for entity in model.get("entities", []):
+                    cursor.execute(
+                        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
+                        ("biz", entity["entity"]))
+                    existing = {row[0] for row in cursor.fetchall()}
+                    expected = {f["column"] for f in entity["fields"]}
+                    missing = expected - existing
+                    if missing:
+                        raise RuntimeError(
+                            f"表 {entity['entity']} 已存在且与模型不一致（缺列：{sorted(missing)}）。"
+                            "可能是旧版本残留：请换实体名或手工 DROP 后重跑。")
         finally:
             connection.close()
         result.record("③ 建表（biz）", True, f"{len(scripts)} 个脚本，{applied} 条语句")
@@ -116,32 +133,47 @@ class Pipeline:
         # 编译失败交修复循环：3 轮 × 15 步，成功即完成本步
         error_file = version_dir / "target/compile-errors.txt"
         error_file.write_text(output, encoding="utf-8")
-        repair = repair(version_dir, output,
-                        log_path=self.root / "workspace/repair" / f"{model_version}-pipeline.jsonl")
-        if repair.outcome == "SUCCESS":
-            result.record("④ 编译（经修复循环）", True, f"{repair.steps_used} 步修复")
+        # 局部名不能用 repair——会遮蔽导入的修复函数（UnboundLocalError，实测踩过）
+        repair_result = repair(version_dir, output,
+                               log_path=self.root / "workspace/repair" / f"{model_version}-pipeline.jsonl")
+        if repair_result.outcome == "SUCCESS":
+            result.record("④ 编译（经修复循环）", True, f"{repair_result.steps_used} 步修复")
             return
-        result.record("④ 编译（经修复循环）", False, repair.reason or "修复失败")
-        raise RuntimeError(f"编译失败且修复未成功：{repair.reason}")
+        result.record("④ 编译（经修复循环）", False, repair_result.reason or "修复失败")
+        raise RuntimeError(f"编译失败且修复未成功：{repair_result.reason}")
 
     # ------------------------------------------------------------------ ⑤启动
 
     def step_start(self, version_dir: Path, result: PipelineResult) -> None:
         log_file = self.root / "workspace/logs" / f"{version_dir.name}-app.log"
         log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # 端口被占（通常是上次中断留下的产物进程）必须先失败：
+        # 健康检查会打到旧进程身上，产生「启动成功、验收 404」的假阳性（实测踩过）
+        if _healthy(self.port) or _port_busy(self.port):
+            result.record("⑤ 启动", False, f"端口 {self.port} 已被占用，请先停掉残留的产物进程")
+            raise RuntimeError(f"端口 {self.port} 被占用")
+
         jar = version_dir / "target/syscraft-skeleton-0.1.0.jar"
         self.process = subprocess.Popen(
             ["java", "-jar", str(jar), f"--server.port={self.port}"],
             stdout=open(log_file, "w"), stderr=subprocess.STDOUT,
             env={**os.environ},
         )
+        # 给端口绑定失败留出暴露时间：起 3 秒后子进程若已退出，直接判失败，
+        # 免得健康检查打到别的进程身上
+        time.sleep(3)
+        if self.process.poll() is not None:
+            result.record("⑤ 启动", False, "进程提前退出（多为端口冲突），见 " + str(log_file))
+            raise RuntimeError("产物进程退出")
+
         deadline = time.time() + HEALTH_TIMEOUT_SECONDS
         while time.time() < deadline:
             if self.process.poll() is not None:
                 result.record("⑤ 启动", False, "进程提前退出，见 " + str(log_file))
                 raise RuntimeError("产物进程退出")
             if _healthy(self.port):
-                result.record("⑤ 启动", True, f"port {self.port}")
+                result.record("⑤ 启动", True, f"port {self.port} pid {self.process.pid}")
                 return
             time.sleep(1)
         result.record("⑤ 启动", False, "健康检查超时")
@@ -186,7 +218,7 @@ class Pipeline:
 
         try:
             version_dir = self.step_generate(model_path, result)
-            self.step_apply_ddl(version, result)
+            self.step_apply_ddl(version, model, result)
             self.step_apply_grants(version, result)
             self.step_build(version_dir, version, result)
             self.step_start(version_dir, result)
@@ -231,6 +263,22 @@ def _maven_build(version_dir: Path) -> tuple[bool, str]:
     process = subprocess.run([str(maven), "-B", "-q", "package", "-DskipTests"],
                              cwd=version_dir, capture_output=True, text=True, timeout=600)
     return process.returncode == 0, (process.stdout + process.stderr)[-4000:]
+
+
+def _port_busy(port: int) -> bool:
+    """健康接口没起来不代表端口空着——占用者可能是个不响应 /actuator 的进程。"""
+    import socket
+    with socket.socket() as sock:
+        sock.settimeout(1)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _port_busy(port: int) -> bool:
+    """健康接口没起来不代表端口空着——占用者可能是个不响应 /actuator 的进程。"""
+    import socket
+    with socket.socket() as sock:
+        sock.settimeout(1)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def _healthy(port: int) -> bool:

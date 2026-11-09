@@ -1,0 +1,13 @@
+package com.generated.generated.dto;
+
+import com.generated.platform.common.FilterGroup;
+import com.generated.platform.common.OrderBy;
+
+import java.util.List;
+
+/**
+ * {{ display_name }} 查询条件。形态与所有实体一致，只有类名不同：
+ * 条件组 + 排序 + 分页，见《通用数据接口设计》3 节。
+ */
+public record {{ class_name }}Query(FilterGroup filter, List<OrderBy> orderBy, Integer page, Integer size) {
+}

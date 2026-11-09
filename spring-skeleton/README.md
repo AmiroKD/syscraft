@@ -36,21 +36,10 @@ TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: applicat
 curl -s localhost:8080/api/auth/me -H "Authorization: Bearer $TOKEN"
 ```
 
-当前只连 `adm` 库；`biz` 数据源要等第一张业务表随模板生成后才需要，届时两个 DataSource 都要显式声明并指定 `@Primary`。
+## 双数据源
 
-## 权限码探针（第 3 步验收用）
+`adm`（权限）与 `biz`（业务）各一个数据源、各一个 `SqlSessionFactory`：
 
-真实业务 Controller 要等模板生成才出现，所以第 3 步先用 `PermissionProbeController` 证明矩阵生效。
-它只在 `probe` profile 下加载，正常启动不会注册这两个端点：
-
-```bash
-env -u SERVER__PORT java -jar target/syscraft-skeleton-0.1.0.jar \
-  --server.port=8080 --spring.profiles.active=probe
-
-# 同一端点，有授权 200、无授权 403
-curl -s -w ' %{http_code}\n' localhost:8080/api/probe/order/read -H "Authorization: Bearer $TOKEN"
-```
-
-第 4 步真实 Controller 落地后删除 `com.generated.platform.probe` 整个包。
-
-
+- 扫描入口分别是 `AdmDataSourceConfig` 与 `BizDataSourceConfig`，`PlatformApplication` 不写 `@MapperScan`
+- 启动类扫描根是 `com.generated`：生成物在 `com.generated.generated`，用默认扫描根会整批漏掉（现象是全接口 404，且启动不报错）
+- 两个库不能共用一个工厂，否则 admin 的 Mapper 会拿 biz 的连接去查 `adm_user`

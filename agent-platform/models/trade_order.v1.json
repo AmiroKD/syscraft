@@ -1,0 +1,36 @@
+{
+  "model_version": "v1",
+  "requirement": "订单管理：录入订单，记录客户、数量、单价，金额自动算出；订单状态按 已创建→已支付→已发货 流转。",
+  "entities": [
+    {
+      "entity": "trade_order",
+      "class_name": "TradeOrder",
+      "display_name": "订单",
+      "owner_field": null,
+      "fields": [
+        { "column": "id", "property": "id", "type": "BIGINT", "primary_key": true, "nullable": false, "unique": true, "semantic": "主键", "visibility": "PLAIN", "sensitive": false },
+        { "column": "order_no", "property": "orderNo", "type": "VARCHAR", "length": 32, "primary_key": false, "nullable": false, "unique": true, "semantic": "订单号", "visibility": "PLAIN", "sensitive": false },
+        { "column": "customer", "property": "customer", "type": "VARCHAR", "length": 64, "primary_key": false, "nullable": false, "unique": false, "semantic": "客户", "visibility": "PLAIN", "sensitive": false },
+        { "column": "qty", "property": "qty", "type": "INT", "primary_key": false, "nullable": false, "unique": false, "semantic": "数量", "visibility": "PLAIN", "sensitive": false },
+        { "column": "price", "property": "price", "type": "DECIMAL", "precision": 12, "scale": 2, "primary_key": false, "nullable": false, "unique": false, "semantic": "单价", "visibility": "PLAIN", "sensitive": false },
+        { "column": "amount", "property": "amount", "type": "DECIMAL", "precision": 12, "scale": 2, "primary_key": false, "nullable": true, "unique": false, "semantic": "金额", "visibility": "PLAIN", "sensitive": false },
+        { "column": "status", "property": "status", "type": "VARCHAR", "length": 16, "primary_key": false, "nullable": false, "unique": false, "semantic": "状态", "visibility": "PLAIN", "sensitive": false, "sample": "CREATED" },
+        { "column": "created_at", "property": "createdAt", "type": "DATETIME", "primary_key": false, "nullable": false, "unique": false, "semantic": "创建时间", "visibility": "PLAIN", "sensitive": false }
+      ],
+      "rules": {
+        "computed": [
+          { "target": "amount", "op": "MULTIPLY", "left": "qty", "right": "price" }
+        ],
+        "constraints": [
+          { "field": "qty", "op": "GT", "value": 0, "message": "数量必须大于 0" }
+        ],
+        "states": [
+          { "field": "status", "flow": ["CREATED", "PAID", "SHIPPED"] }
+        ]
+      }
+    }
+  ],
+  "grants": [
+    { "role": "USER", "entity": "trade_order", "access": "READ" }
+  ]
+}

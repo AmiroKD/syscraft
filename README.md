@@ -32,15 +32,41 @@ code/
 
 ```bash
 cd agent-platform
-uv venv --python 3.12 && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv venv --python 3.12
+uv pip install --python .venv/bin/python jinja2 httpx   # 其余依赖见 requirements.txt
 ```
 
 数据库凭证不在仓库里：
 
 ```bash
-source ~/.adaptive/db.env
+set -a; source ~/.adaptive/db.env; set +a   # 少了 set -a，Java 读不到 APP_PWD
 ```
+
+## 一次完整生成（当前已跑通的最窄链路）
+
+```bash
+cd agent-platform
+
+# ① 渲染：模型 → workspace/versions/v{n}/ 完整工程 + DDL + 快照 + 验收清单
+PYTHONPATH=src .venv/bin/python -m syscraft.codegen.generator --model models/trade_order.v1.json
+
+# ② 建业务表（mcp 账号，biz 库）与写结构快照（app 账号，adm 库）
+mysql -u"$MCP_USER" -p"$MCP_PWD" biz < workspace/scripts/ddl/v1_001_trade_order.sql
+mysql -u"$APP_USER" -p"$APP_PWD" adm < workspace/scripts/snapshot/v1_001_trade_order.sql
+
+# ③ 编译并启动
+cd workspace/versions/v1
+~/.m2/wrapper/dists/apache-maven-3.9.12/57e1dc81/bin/mvn -q package -DskipTests
+env -u SERVER__PORT java -jar target/syscraft-skeleton-0.1.0.jar --server.port=8080
+
+# ④ 验收（另开一个终端；验收账号先建好，口令放环境变量 ACC_ADMIN_PWD / ACC_USER_PWD）
+cd agent-platform
+PYTHONPATH=src .venv/bin/python -m syscraft.runtime.acceptance \
+  --base-url http://127.0.0.1:8080 --spec templates/acceptance/v1.json \
+  --report workspace/logs/acceptance-v1.json
+```
+
+生成器拒绝覆盖已存在的版本目录：换 `model_version` 或先手工删除。
 
 ## 约定
 

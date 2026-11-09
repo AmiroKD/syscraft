@@ -1,0 +1,20 @@
+package com.generated.generated.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+{% for imp in imports %}
+import {{ imp }};
+{% endfor %}
+
+/**
+ * {{ display_name }} 返回视图。
+ *
+ * <p>隐藏字段<b>不进这个类</b>：类型层面就不存在，比在序列化时过滤更可靠，
+ * 也不会因为某个分支漏处理而泄漏（《代码生成器设计》3.5）。</p>
+ */
+public record {{ class_name }}VO(
+{% for f in visible_fields %}
+        @JsonProperty("{{ f.column }}") {{ f.java_type }} {{ f.property }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+) {
+}

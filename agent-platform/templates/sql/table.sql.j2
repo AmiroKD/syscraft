@@ -1,0 +1,8 @@
+-- {{ display_name }}（{{ entity }}）—— 模型 {{ model_version }} 渲染，幂等
+-- 业务表在 biz 库；权限表在 adm 库，两库隔离（权限 6 节）
+CREATE TABLE IF NOT EXISTS {{ entity }} (
+{% for f in fields %}
+    {{ f.ddl_line }},
+{% endfor %}
+    PRIMARY KEY (id){{ unique_clause }}
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '{{ display_name }}';

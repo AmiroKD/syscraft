@@ -5,6 +5,8 @@ import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -61,6 +63,23 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> onNoRole(NotRoleException e) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(ApiResponse.fail(ErrorCode.FORBIDDEN, "无此角色：" + e.getRole()));
+    }
+
+    /**
+     * 唯一约束冲突。落到这里说明校验段没挡住（例如并发插入同一个订单号），
+     * 语义是 409 而不是 500——调用方重试或换值即可。
+     */
+    @ExceptionHandler(DuplicateKeyException.class)
+    public ResponseEntity<ApiResponse<Void>> onDuplicate(DuplicateKeyException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail(ErrorCode.CONFLICT, "记录已存在：唯一约束冲突"));
+    }
+
+    /** 没有这个路由：返回 404 而不是 500——路径写错是调用方的问题，不是服务端故障 */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> onNoRoute(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ErrorCode.NOT_FOUND, "接口不存在：" + e.getResourcePath()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

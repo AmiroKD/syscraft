@@ -5,16 +5,30 @@ spring:
   application:
     name: syscraft-skeleton
 
-  # 双库隔离（权限 6 节）：骨架这一步只连 adm——业务表要到第一张模板生成后才存在。
-  # biz 数据源在生成流程落地时补上，届时两个 DataSource 都要显式声明并指定 @Primary。
+  # 不设全局 SNAKE_CASE：契约里查询 DSL 的键是驼峰（orderBy / groupBy），
+  # 只有数据字段是下划线（order_no）。全局改名会把 groupBy 变成 group_by，
+  # 请求体里的分组条件就静默丢了。数据字段的命名由实体/VO 上的 @JsonProperty 决定。
+
+  # 双库隔离（权限 6 节）：adm 存权限，biz 存业务。两个库各一个数据源，
+  # 各一个 SqlSessionFactory，扫描入口见 AdmDataSourceConfig / BizDataSourceConfig。
+  # Hikari 的字段名是 jdbc-url，写成 url 不会绑定。
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/adm?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
-    # 账号口令只从环境变量取（源头是 ~/.adaptive/db.env，600，不在项目内）
-    username: ${APP_USER:app}
-    password: ${APP_PWD:}
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    hikari:
+    adm:
+      jdbc-url: jdbc:mysql://127.0.0.1:3306/adm?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      # 账号口令只从环境变量取（源头是 ~/.adaptive/db.env，600，不在项目内）
+      username: ${APP_USER:app}
+      password: ${APP_PWD:}
+      driver-class-name: com.mysql.cj.jdbc.Driver
       pool-name: adm-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+    biz:
+      jdbc-url: jdbc:mysql://127.0.0.1:3306/biz?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      username: ${APP_USER:app}
+      password: ${APP_PWD:}
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      pool-name: biz-pool
       maximum-pool-size: 10
       minimum-idle: 2
       connection-timeout: 5000

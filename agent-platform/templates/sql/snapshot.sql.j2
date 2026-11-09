@@ -1,0 +1,28 @@
+-- 结构快照与默认授权 —— 模型 {{ model_version }} 渲染，幂等
+--
+-- 位置说明：快照属于 adm 库，而平台侧（Python）不直连 adm，契约里也没有写快照的端点
+-- （《平台与产物接口契约》2.4 三个端点都是 GET）。这里做成一份可重复执行的 SQL 由部署环节应用，
+-- 是临时桥接，等写快照的端点定下来后替换。见本次汇报的「待你决定」一节。
+
+INSERT INTO adm_entity_snapshot (entity, display_name, owner_field, field_count, version)
+VALUES ('{{ entity }}', '{{ display_name }}', {{ owner_field }}, {{ fields | length }}, {{ version }})
+ON DUPLICATE KEY UPDATE display_name = VALUES(display_name),
+                        owner_field  = VALUES(owner_field),
+                        field_count  = VALUES(field_count),
+                        version      = VALUES(version);
+
+-- 字段快照整表重建：先删后插比逐列比对简单，且快照本来就是派生物、可丢弃
+DELETE FROM adm_field_snapshot WHERE entity = '{{ entity }}';
+
+INSERT INTO adm_field_snapshot
+    (entity, field, data_type, semantic, nullable, unique_flag, `sensitive`, visibility, ordinal)
+VALUES
+{{ field_values }};
+
+{% for g in grants %}
+-- 默认授权：{{ g.role }} 对新表 {{ g.access }}（保守起步，写入权由管理员显式上调）
+INSERT INTO adm_table_grant (subject_type, subject_id, entity, access, granted_by)
+SELECT 'ROLE', r.id, '{{ entity }}', '{{ g.access }}', NULL
+  FROM adm_role r WHERE r.code = '{{ g.role }}'
+ON DUPLICATE KEY UPDATE access = VALUES(access);
+{% endfor %}

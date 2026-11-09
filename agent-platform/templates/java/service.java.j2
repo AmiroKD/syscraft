@@ -1,0 +1,310 @@
+package com.generated.generated.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.generated.generated.dto.{{ class_name }}Query;
+import com.generated.generated.dto.{{ class_name }}VO;
+import com.generated.generated.entity.{{ class_name }};
+import com.generated.generated.mapper.{{ class_name }}Mapper;
+import com.generated.platform.common.AggregateRequest;
+import com.generated.platform.common.BizException;
+import com.generated.platform.common.Cond;
+import com.generated.platform.common.ErrorCode;
+import com.generated.platform.common.FilterGroup;
+import com.generated.platform.common.IdsRequest;
+import com.generated.platform.common.Metric;
+import com.generated.platform.common.OrderBy;
+import com.generated.platform.common.PageResult;
+import com.generated.platform.common.QueryOps;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+{% for imp in imports %}
+import {{ imp }};
+{% endfor %}
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * {{ display_name }} 业务逻辑。结构固定为三段：<b>校验 → 规则 → 落库</b>。
+ *
+ * <p>模板渲染生成，不要手改——下次生成会覆盖。要改行为就改模板。</p>
+ */
+@Service
+public class {{ class_name }}Service {
+
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 200;
+    private static final int MAX_AGGREGATE_ROWS = 100;
+
+    /** 字段名 → 列名。只服务聚合与排序这类必须传字符串的场合，取值来自生成期模型 */
+    private static final Map<String, String> COLUMN = new LinkedHashMap<>();
+
+    static {
+{% for f in fields %}
+        COLUMN.put("{{ f.column }}", "{{ f.column }}");
+{% endfor %}
+    }
+{% if state_rule %}
+
+    /** 状态流转顺序：只能沿此顺序前进一格，跳级与回退都拒绝 */
+    private static final List<String> {{ state_rule.constant }} = List.of({% for s in state_rule.flow %}"{{ s }}"{% if not loop.last %}, {% endif %}{% endfor %});
+{% endif %}
+
+    private final {{ class_name }}Mapper mapper;
+
+    public {{ class_name }}Service({{ class_name }}Mapper mapper) {
+        this.mapper = mapper;
+    }
+
+    // ------------------------------------------------------------------ 查询
+
+    @Transactional(readOnly = true)
+    public PageResult<{{ class_name }}VO> query({{ class_name }}Query req) {
+        LambdaQueryWrapper<{{ class_name }}> wrapper = Wrappers.lambdaQuery();
+        applyFilter(wrapper, req == null ? null : req.filter());
+
+        // total 走独立 COUNT，且必须在加 LIMIT 之前算
+        long total = mapper.selectCount(wrapper);
+
+        applyOrder(wrapper, req == null ? null : req.orderBy());
+
+        int page = (req == null || req.page() == null || req.page() < 1) ? 1 : req.page();
+        int requested = (req == null || req.size() == null || req.size() < 1) ? DEFAULT_PAGE_SIZE : req.size();
+        boolean truncated = requested > MAX_PAGE_SIZE;
+        int size = truncated ? MAX_PAGE_SIZE : requested;
+
+        wrapper.last("LIMIT " + size + " OFFSET " + (long) (page - 1) * size);
+        List<{{ class_name }}> records = mapper.selectList(wrapper);
+
+        List<{{ class_name }}VO> rows = new ArrayList<>(records.size());
+        for ({{ class_name }} record : records) {
+            rows.add(toVO(record));
+        }
+        return new PageResult<>(rows, total, page, size, truncated);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> aggregate(AggregateRequest req) {
+        if (req == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请求体不能为空");
+        }
+        if (req.filter() != null && req.filter().isOr()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "聚合暂不支持 OR 条件，请拆成多次查询");
+        }
+        QueryWrapper<{{ class_name }}> wrapper = new QueryWrapper<>();
+        List<String> select = new ArrayList<>();
+
+        if (req.groupBy() != null) {
+            for (String field : req.groupBy()) {
+                String column = columnOf(field, "分组");
+                select.add(column);
+                wrapper.groupBy(column);
+            }
+        }
+
+        List<Metric> metrics = (req.metrics() == null || req.metrics().isEmpty())
+                ? List.of(new Metric("COUNT", null, "cnt"))
+                : req.metrics();
+        for (Metric metric : metrics) {
+            select.add(metricSql(metric));
+        }
+        wrapper.select(select.toArray(new String[0]));
+
+        applyStringFilter(wrapper, req.filter());
+        // 结果行数上限进 SQL，不靠调用方自觉
+        wrapper.last("LIMIT " + MAX_AGGREGATE_ROWS);
+        return mapper.selectMaps(wrapper);
+    }
+
+    private String metricSql(Metric metric) {
+        String func = (metric.func() == null ? "COUNT" : metric.func().toUpperCase());
+        String alias = (metric.alias() == null || metric.alias().isBlank()) ? "m" : metric.alias();
+        // 别名会拼进 SQL，只允许安全字符；参数化在这里不适用，只能白名单
+        if (!alias.matches("[\\w\\u4e00-\\u9fa5]{1,32}")) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "非法的聚合别名：" + alias);
+        }
+        if ("COUNT".equals(func)) {
+            return "COUNT(*) AS `" + alias + "`";
+        }
+        if (!List.of("SUM", "AVG", "MAX", "MIN").contains(func)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "不支持的聚合函数：" + metric.func());
+        }
+        return func + "(" + columnOf(metric.field(), "统计") + ") AS `" + alias + "`";
+    }
+
+    // ------------------------------------------------------------------ 写入
+
+    @Transactional
+    public Long insert({{ class_name }} entity) {
+        if (entity == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请求体不能为空");
+        }
+        validate(entity);
+        applyComputed(entity);
+        mapper.insert(entity);
+        return entity.getId();
+    }
+
+    @Transactional
+    public void update({{ class_name }} entity) {
+        if (entity == null || entity.getId() == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "更新必须带主键 id");
+        }
+        {{ class_name }} existing = mapper.selectById(entity.getId());
+        if (existing == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "记录不存在：" + entity.getId());
+        }
+        validate(entity);
+        applyComputed(entity);
+{% if state_rule %}
+        checkTransition(existing, entity);
+{% endif %}
+        mapper.updateById(entity);
+    }
+
+    @Transactional
+    public int delete(IdsRequest req) {
+        if (req == null || req.ids() == null || req.ids().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "ids 不能为空");
+        }
+        return mapper.deleteByIds(req.ids());
+    }
+
+    // ------------------------------------------------------- 校验段（模板固定句式）
+
+    private void validate({{ class_name }} e) {
+{% for c in not_null_checks %}
+        if ({{ c.condition }}) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "{{ c.message }}");
+        }
+{% endfor %}
+{% for c in constraints %}
+        if ({{ c.condition }}) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "{{ c.message }}");
+        }
+{% endfor %}
+{% if not not_null_checks and not constraints %}
+        // 该实体没有可校验的约束
+{% endif %}
+    }
+
+{% if computed_rules %}
+    // --------------------------------------------------------- 规则段（计算字段）
+
+    private void applyComputed({{ class_name }} e) {
+{% for r in computed_rules %}
+        // {{ r.expression }}
+        if (e.get{{ r.left_getter }}() != null && e.get{{ r.right_getter }}() != null) {
+            e.set{{ r.target_getter }}({{ r.left_expr }}{{ r.method }}({{ r.right_expr }}));
+        }
+{% endfor %}
+    }
+{% endif %}
+{% if state_rule %}
+
+    // ----------------------------------------------------------- 规则段（状态机）
+
+    private void checkTransition({{ class_name }} existing, {{ class_name }} incoming) {
+        if (incoming.get{{ state_rule.getter }}() == null
+                || Objects.equals(incoming.get{{ state_rule.getter }}(), existing.get{{ state_rule.getter }}())) {
+            return;
+        }
+        int from = {{ state_rule.constant }}.indexOf(existing.get{{ state_rule.getter }}());
+        int to = {{ state_rule.constant }}.indexOf(incoming.get{{ state_rule.getter }}());
+        if (from < 0 || to != from + 1) {
+            throw new BizException(ErrorCode.CONFLICT,
+                    "非法状态流转：" + existing.get{{ state_rule.getter }}() + " → " + incoming.get{{ state_rule.getter }}());
+        }
+    }
+{% endif %}
+
+    // ---------------------------------------------------------------- 条件装配
+
+    private void applyFilter(LambdaQueryWrapper<{{ class_name }}> wrapper, FilterGroup filter) {
+        if (filter == null || filter.conditions() == null || filter.conditions().isEmpty()) {
+            return;
+        }
+        if (filter.isOr()) {
+            wrapper.and(inner -> {
+                List<Cond> conditions = filter.conditions();
+                for (int i = 0; i < conditions.size(); i++) {
+                    if (i > 0) {
+                        inner.or();
+                    }
+                    applyOne(inner, conditions.get(i));
+                }
+            });
+            return;
+        }
+        for (Cond cond : filter.conditions()) {
+            applyOne(wrapper, cond);
+        }
+    }
+
+    /** 字段名 → 方法引用。写死在这里，字段改名时编译期就会报错 */
+    private void applyOne(LambdaQueryWrapper<{{ class_name }}> wrapper, Cond cond) {
+        if (cond == null || cond.field() == null) {
+            return;
+        }
+        switch (cond.field()) {
+{% for f in fields %}
+            case "{{ f.column }}" -> QueryOps.apply(wrapper, {{ class_name }}::get{{ f.getter }}, cond);
+{% endfor %}
+            default -> throw new BizException(ErrorCode.BAD_REQUEST, "未知查询字段：" + cond.field());
+        }
+    }
+
+    private void applyOrder(LambdaQueryWrapper<{{ class_name }}> wrapper, List<OrderBy> orderBy) {
+        if (orderBy == null || orderBy.isEmpty()) {
+            return;
+        }
+        for (OrderBy item : orderBy) {
+            if (item == null || item.field() == null) {
+                continue;
+            }
+            switch (item.field()) {
+{% for f in fields %}
+                case "{{ f.column }}" -> {
+                    if (item.isDesc()) {
+                        wrapper.orderByDesc({{ class_name }}::get{{ f.getter }});
+                    } else {
+                        wrapper.orderByAsc({{ class_name }}::get{{ f.getter }});
+                    }
+                }
+{% endfor %}
+                default -> throw new BizException(ErrorCode.BAD_REQUEST, "未知排序字段：" + item.field());
+            }
+        }
+    }
+
+    private void applyStringFilter(QueryWrapper<{{ class_name }}> wrapper, FilterGroup filter) {
+        if (filter == null || filter.conditions() == null) {
+            return;
+        }
+        for (Cond cond : filter.conditions()) {
+            if (cond == null || cond.field() == null) {
+                continue;
+            }
+            QueryOps.apply(wrapper, columnOf(cond.field(), "查询"), cond);
+        }
+    }
+
+    private String columnOf(String field, String usage) {
+        String column = COLUMN.get(field);
+        if (column == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "未知" + usage + "字段：" + field);
+        }
+        return column;
+    }
+
+    // -------------------------------------------------------------------- 转换
+
+    private {{ class_name }}VO toVO({{ class_name }} e) {
+        return new {{ class_name }}VO({% for f in visible_fields %}e.get{{ f.getter }}(){% if not loop.last %}, {% endif %}{% endfor %});
+    }
+}

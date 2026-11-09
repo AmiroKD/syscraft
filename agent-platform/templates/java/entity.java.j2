@@ -1,0 +1,41 @@
+package com.generated.generated.entity;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonProperty;
+{% for imp in imports %}
+import {{ imp }};
+{% endfor %}
+
+/**
+ * {{ display_name }}（{{ entity }}）。模板渲染生成，不要手改——下次生成会覆盖。
+ *
+ * <p>字段统一用包装类型：int 默认 0 会让「没填」与「填了 0」分不开。</p>
+ *
+ * <p>@JsonProperty 逐字段写列名，而不用全局命名策略：契约里查询 DSL 的键是驼峰
+ * （orderBy / groupBy），只有数据字段是下划线，两者不能共用一套规则。</p>
+ */
+@TableName("{{ entity }}")
+public class {{ class_name }} {
+{% for f in fields %}
+{% if f.primary_key %}
+    @TableId(type = IdType.AUTO)
+{% endif %}
+    @JsonProperty("{{ f.column }}")
+    private {{ f.java_type }} {{ f.property }};
+
+{% endfor %}
+{% for f in fields %}
+    public {{ f.java_type }} get{{ f.getter }}() {
+        return {{ f.property }};
+    }
+
+    public void set{{ f.getter }}({{ f.java_type }} {{ f.property }}) {
+        this.{{ f.property }} = {{ f.property }};
+    }
+{% if not loop.last %}
+
+{% endif %}
+{% endfor %}
+}

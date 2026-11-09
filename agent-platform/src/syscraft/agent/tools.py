@@ -135,9 +135,16 @@ class ToolBox:
 
     async def _aggregate(self, args: dict, session: Any) -> dict:
         entity = self._entity(args.get("entity", ""))
+        # groupBy 严格白名单：未知字段在这里拦下（产物侧还有一道静态映射兜底，
+        # 但错误要在最近的边界暴露，别让 LLM 的幻觉一路打到数据库）
+        group_by = []
+        for g in (args.get("groupBy") or []):
+            field = entity.field(str(g))
+            if field is None:
+                raise ToolInputError(f"分组字段 {g!r} 不在 {entity.entity} 里")
+            group_by.append(field.column)
         request = {
-            "groupBy": [entity.field(str(g)).column if entity.field(str(g)) else str(g)
-                        for g in (args.get("groupBy") or [])],
+            "groupBy": group_by,
             "metrics": args.get("metrics") or [{"func": "COUNT", "alias": "cnt"}],
             "filter": self._validate_filter(entity, args.get("filter")),
         }

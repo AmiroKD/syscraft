@@ -23,6 +23,10 @@ MAX_TURNS = 3
 MAX_STEPS = 15
 
 
+class RepairCancelled(RuntimeError):
+    """修复循环中用户取消（每步边界检查）。半改文件留在版本目录，产物不上线。"""
+
+
 @dataclass
 class RepairResult:
     outcome: str            # SUCCESS / ABORT
@@ -35,10 +39,12 @@ class RepairResult:
 def repair(version_dir: Path, compile_errors: str, llm: RepairLLM | None = None,
            build_runner=None, log_path: Path | None = None,
            max_turns: int = MAX_TURNS, max_steps: int = MAX_STEPS,
-           on_log=None) -> RepairResult:
+           on_log=None, should_cancel=None) -> RepairResult:
     """on_log(text)：每步动作完成后的可读摘要（对话式生成用它推 SSE log 事件，
     截断瘦身由调用方负责，这里给原文）。留痕 jsonl 不变——日志事件是展示层，
-    事件全量落盘才是审计层（6.9），两者不混。"""
+    事件全量落盘才是审计层（6.9），两者不混。
+    should_cancel()：每步边界轮询——修复循环是最长的一步（3×15 次 LLM 调用，
+    十几分钟），取消能力必须能钻进来，否则「步骤边界」就成了十分钟不可取消。"""
     version_dir = version_dir.resolve()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     log_path = log_path or Path("workspace/repair") / f"{version_dir.name}-{stamp}.jsonl"
@@ -57,6 +63,8 @@ def repair(version_dir: Path, compile_errors: str, llm: RepairLLM | None = None,
     for turn in range(1, max_turns + 1):
         for step in range(1, max_steps + 1):
             steps_used += 1
+            if should_cancel and should_cancel():
+                raise RepairCancelled("用户在修复循环中取消")
             context = project(log, version_dir, turn, step, max_turns, max_steps)
             try:
                 action, tokens = llm.decide(context)

@@ -180,3 +180,32 @@ async def test_generation_requires_privileged_role(store):
     ok = await flow.handle("做一个库存管理系统", "tk", session, lambda e: None,
                            me={"roleCode": "SUPER_ADMIN"})
     assert ok is not None and "管理员权限" not in (ok.get("reply") or "")
+
+
+@pytest.mark.anyio
+async def test_running_state_recovers_after_platform_restart(store):
+    """平台重启后 gen_state 残留 running（SQLite 持久化）但生成锁已随进程消失：
+    必须自动复位，否则用户永远卡在「生成中」。"""
+    flow = GenerationFlow(client=None)
+    session = store.create(user_id=1)
+    session.set_slot("gen_state", "running")  # 模拟崩溃残留
+    result = await flow.handle("查一下订单", "tk", session, lambda e: None,
+                               me={"roleCode": "SUPER_ADMIN"})
+    assert session.get_slot("gen_state") is None  # 复位（返回 None 交回业务模式）
+
+
+@pytest.mark.anyio
+async def test_running_state_with_live_lock_still_rejects(store):
+    """锁真的被持有时，running 状态照常拒绝（不能误复位活任务）。"""
+    from syscraft.conversation.stream_hub import generation_lock
+    await generation_lock.acquire()
+    try:
+        flow = GenerationFlow(client=None)
+        session = store.create(user_id=1)
+        session.set_slot("gen_state", "running")
+        result = await flow.handle("随便说", "tk", session, lambda e: None,
+                                   me={"roleCode": "SUPER_ADMIN"})
+        assert result is not None and "生成中" in result["reply"]
+        assert session.get_slot("gen_state") == "running"
+    finally:
+        generation_lock.release()

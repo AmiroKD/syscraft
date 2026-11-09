@@ -156,13 +156,13 @@ class BusinessAgent:
 
         # ① 确认词短路：不进 LLM——它没有实体与条件，只是「同意上一条预告」。
         #    令牌核销只有这一条路，模型不在环里（tools.py 的结构性约束）。
-        if message.lower() in CONFIRM_WORDS:
+        #    只有真有待确认操作才短路：用户正常聊天说「好的」不该被硬回
+        #    「没有待确认的操作」（实测体验：确认词误触会打断正常对话）
+        pending = session.get_slot("pending_confirm") if message.lower() in CONFIRM_WORDS else None
+        if message.lower() in CONFIRM_WORDS and pending is not None:
             session.append("user", "text", message)
-            pending = session.get_slot("pending_confirm")
             session.set_slot("pending_confirm", None)
-            if not pending:
-                reply = "当前没有待确认的操作。"
-            elif self._expired(pending):
+            if self._expired(pending):
                 reply = "待确认的操作已超时（令牌 5 分钟有效），请重新发起。"
             else:
                 try:
@@ -175,6 +175,8 @@ class BusinessAgent:
             session.append("assistant", "text", reply)
             events.append({"type": "text", "text": reply})
             return {"user_message": message, "reply": reply, "stop": True, "events": events}
+        if message.lower() in CONFIRM_WORDS and pending is None:
+            session.set_slot("pending_confirm", None)  # 确认词但无预告：清掉可能的空槽位，正常进 LLM
 
         # ② 指代消解（设计 3.2，确定性规则优先于模型发挥）
         rewritten = message

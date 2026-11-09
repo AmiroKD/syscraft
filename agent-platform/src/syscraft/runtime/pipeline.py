@@ -25,7 +25,7 @@ import pymysql
 
 from syscraft import config
 from syscraft.codegen.generator import generate
-from syscraft.codegen.repair.repair_loop import repair
+from syscraft.codegen.repair.repair_loop import RepairCancelled, repair
 from syscraft.runtime.acceptance import AcceptanceRunner
 
 HEALTH_TIMEOUT_SECONDS = 90
@@ -211,7 +211,8 @@ class Pipeline:
         # 局部名不能用 repair——会遮蔽导入的修复函数（UnboundLocalError，实测踩过）
         repair_result = repair(version_dir, output,
                                log_path=self.root / "workspace/repair" / f"{model_version}-pipeline.jsonl",
-                               on_log=lambda text: log_event("repair", text))
+                               on_log=lambda text: log_event("repair", text),
+                               should_cancel=self._should_cancel)
         if repair_result.outcome == "SUCCESS":
             result.record("④ 编译（经修复循环）", True, f"{repair_result.steps_used} 步修复")
             return
@@ -339,7 +340,8 @@ class Pipeline:
             result.ok = True
             summary = {"version": version, "ok": True, "steps": [s.__dict__ for s in result.steps],
                        "acceptance": report["summary"]}
-        except GenerationCancelled:
+        except (GenerationCancelled, RepairCancelled):
+            # RepairCancelled：修复循环（最长的一步）内部的取消，语义与边界取消一致
             result.ok = False
             result.failed_step = result.steps[-1].name if result.steps else "?"
             result.error = "用户取消生成"

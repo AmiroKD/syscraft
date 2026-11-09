@@ -65,7 +65,15 @@ class GenerationFlow:
 
         if state == "running":
             session.append("user", "text", message)
-            return {"reply": "系统正在生成中（见下方进度），可点进度面板上的「取消生成」终止。"}
+            # 生成锁才是运行的唯一真相：平台重启后锁随进程消失，
+            # 但 gen_state 槽位持久化在 SQLite——不复位的话用户永远卡在「生成中」
+            from syscraft.conversation.stream_hub import generation_lock
+            if not generation_lock.locked():
+                session.set_slot("gen_state", None)
+                self._running_owner = None
+                self._cancel.clear()
+            else:
+                return {"reply": "系统正在生成中（见下方进度），可点进度面板上的「取消生成」终止。"}
 
         if state == "awaiting_plan":
             session.append("user", "text", message)
@@ -90,7 +98,6 @@ class GenerationFlow:
         # idle：先判生成意图，不是就交回业务模式（不落盘，业务图自己落）
         if not self.is_generation_intent(message):
             return None
-
         # 生成触发角色门槛（fail-closed）：命中意图但无权 → 落盘后拒绝
         if (me or {}).get("roleCode") not in self.GENERATION_ROLES:
             session.append("user", "text", message)

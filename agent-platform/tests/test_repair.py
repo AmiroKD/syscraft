@@ -187,3 +187,28 @@ def test_loop_aborts_on_identical_turn_errors(version_dir):
                     llm=RepairLLM(llm_call=always_build),
                     build_runner=fake_build_fail, log_path=version_dir / "events.jsonl")
     assert result.outcome == "ABORT" and "模板缺陷" in result.reason
+
+
+# ---------------------------------------------------------------- 取消（第二轮审查）
+
+def test_loop_cancelled_midway(version_dir):
+    """should_cancel 在修复循环内部生效：抛 RepairCancelled 而不是烧完 3×15 步。"""
+    import pytest as _pytest
+    from syscraft.codegen.repair.repair_loop import RepairCancelled, repair
+
+    def always_edit(messages):
+        return json.dumps({"tool": "edit_file",
+                           "path": "src/main/java/com/generated/generated/service/DemoService.java",
+                           "old_string": "int a", "new_string": "int b"}), 10
+
+    state = {"n": 0}
+
+    def cancel_on_second_step():
+        state["n"] += 1
+        return state["n"] > 1
+
+    with _pytest.raises(RepairCancelled):
+        repair(version_dir, "Demo.java:3 找不到符号",
+               llm=RepairLLM(llm_call=always_edit),
+               build_runner=fake_build_ok, log_path=version_dir / "events.jsonl",
+               should_cancel=cancel_on_second_step)

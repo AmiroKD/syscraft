@@ -207,12 +207,15 @@ async def test_delete_only_previews_then_confirm_executes(monkeypatch, catalog, 
 
 @pytest.mark.anyio
 async def test_confirm_without_pending(monkeypatch, catalog, store):
-    install_llm(monkeypatch, [text_call("不该被用到")])
+    """无待确认操作时确认词不短路——正常进 LLM（用户说「好的」是在对话，
+    不是在核销；硬回「没有待确认的操作」会打断正常聊天）。"""
+    install_llm(monkeypatch, [text_call("好的，还有什么需要查的？")])
     agent = BusinessAgent(FakeClient(), catalog)
     session = store.create(user_id=1)
 
     final = await agent.run("确认", "tk", session)
-    assert "没有待确认" in final["reply"]
+    assert "还有什么需要查的" in final["reply"]
+    assert session.get_slot("pending_confirm") is None
 
 
 # ---------------------------------------------------------------- 白名单与循环上限

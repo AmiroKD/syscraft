@@ -121,12 +121,18 @@ class _LoginThrottle:
 
     MAX_FAILURES = 5
     LOCK_SECONDS = 300
+    MAX_KEYS = 10_000  # 防注入垃圾 key 撑爆内存（演示语义内足够大）
 
     def __init__(self):
         self._failures: dict[str, list[float]] = {}
 
     def _key(self, username: str, ip: str) -> str:
         return f"{username}@{ip}"
+
+    def _prune(self) -> None:
+        if len(self._failures) > self.MAX_KEYS:
+            # 简单防涨：超限即整体重置——限速是短窗保护，误清的代价远小于 OOM
+            self._failures.clear()
 
     def locked(self, username: str, ip: str) -> int | None:
         """返回剩余锁定秒数（None = 未锁定）。"""
@@ -139,6 +145,7 @@ class _LoginThrottle:
         return None
 
     def record_failure(self, username: str, ip: str) -> None:
+        self._prune()
         self._failures.setdefault(self._key(username, ip), []).append(time.time())
 
     def clear(self, username: str, ip: str) -> None:

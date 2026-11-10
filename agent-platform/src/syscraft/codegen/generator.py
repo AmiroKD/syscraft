@@ -121,6 +121,10 @@ def build_checks(entity: dict) -> dict:
     for f in fields:
         if f.get("primary_key") or f.get("nullable") or f["property"] in constrained:
             continue
+        # created_at 是系统注入字段（DDL 带 DEFAULT CURRENT_TIMESTAMP，insert 由模板补值），
+        # 不能要求调用方传——否则「新增一条活动」会被“创建时间不能为空”卡住
+        if f["column"] == "created_at":
+            continue
         if f["java_type"] == "String":
             condition = f"e.get{f['getter']}() == null || e.get{f['getter']}().isBlank()"
         else:
@@ -204,6 +208,7 @@ def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: s
     # 行级归属：模板据此渲染查询过滤/insert 写入/update·delete 校验
     owner_column = entity.get("owner_field")
     owner_field = next((f for f in fields if f["column"] == owner_column), None)
+    created_at_field = next((f for f in fields if f["column"] == "created_at"), None)
     context = {
         "entity": entity["entity"],
         "class_name": name,
@@ -215,6 +220,8 @@ def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: s
         "owner_property": owner_field["property"] if owner_field else None,
         "owner_getter": owner_field["getter"] if owner_field else None,
         "owner_column": owner_column,
+        # 创建时间由服务端填：模型只声明字段，不要求调用方传值
+        "created_at_getter": created_at_field["getter"] if created_at_field else None,
         **checks,
     }
 

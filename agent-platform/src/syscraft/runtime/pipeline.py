@@ -26,6 +26,7 @@ import pymysql
 from syscraft import config
 from syscraft.codegen.generator import generate
 from syscraft.codegen.repair.repair_loop import RepairCancelled, repair
+from syscraft.requirement.amend import alter_sql
 from syscraft.runtime.acceptance import AcceptanceRunner
 
 HEALTH_TIMEOUT_SECONDS = 90
@@ -48,6 +49,9 @@ class PipelineResult:
     ok: bool = False
     failed_step: str | None = None
     steps: list[StepResult] = field(default_factory=list)
+    # 本次 ALTER 加过的列（entity.column）。和 tablesCreated 一样进报告：
+    # 迁移失败时人工必须知道数据库已经被改到哪一步
+    migrations: list[str] = field(default_factory=list)
     # 步骤回调（对话式生成用来推 SSE）。挂在 result 上而不是 Pipeline 上——
     # record() 是 result 的方法，挂在 Pipeline 上会 AttributeError（实测踩过）
     notify: object | None = field(default=None, repr=False)
@@ -66,11 +70,13 @@ class PipelineResult:
 class Pipeline:
     def __init__(self, project_root: Path | None = None, port: int = 8080,
                  *, notify=None, keep_running: bool = False,
-                 should_cancel=None, on_event=None):
+                 should_cancel=None, on_event=None, allow_migrate: bool = False):
         """notify(name, ok, detail)：每步结束回调（对话式生成用它推 SSE 阶段事件）。
         keep_running：验收成功后不关产物——对话式生成的终态是新版本直接上线。
         should_cancel()：步骤边界轮询的取消标志（对话式生成传 threading.Event.is_set）。
-        on_event(dict)：file/log 级原始事件回调（协议 3 节六种事件的后两种）。"""
+        on_event(dict)：file/log 级原始事件回调（协议 3 节六种事件的后两种）。
+        allow_migrate：允许对已存在的表 ALTER ADD COLUMN。只在「增量修改」链路打开——
+        全量生成时保持关闭，让结构漂移继续以明确错误暴露，而不是被静默改表。"""
         self.root = (project_root or config.PROJECT_ROOT).resolve()
         self.port = port
         self.process: subprocess.Popen | None = None
@@ -78,6 +84,7 @@ class Pipeline:
         self._keep_running = keep_running
         self._should_cancel = should_cancel
         self._on_event = on_event
+        self._allow_migrate = allow_migrate
 
     def _emit(self, event: dict) -> None:
         if self._on_event:
@@ -123,39 +130,53 @@ class Pipeline:
             database="biz", charset="utf8mb4",
         )
         applied = 0
+        migrations: list[str] = []
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s",
                     ("biz",))
-                existing = {row[0] for row in cursor.fetchall()}
+                existing_tables = {row[0] for row in cursor.fetchall()}
                 created = [entity["entity"] for entity in model.get("entities", [])
-                           if entity["entity"] not in existing]
+                           if entity["entity"] not in existing_tables]
                 for script in scripts:
                     for statement in _statements(script):
                         cursor.execute(statement)
                         applied += 1
-            connection.commit()
 
-            # 表结构漂移检测：CREATE TABLE IF NOT EXISTS 对已存在的表不生效，
-            # 而 LLM 每次抽取的字段名有方差（实测：price → unit_price）。
-            # 不查就会「编译通过、运行 500」，必须在这里把漂移暴露出来。
-            with connection.cursor() as cursor:
+                # 表结构漂移检测：CREATE TABLE IF NOT EXISTS 对已存在的表不生效，
+                # 而 LLM 每次抽取的字段名有方差（实测：price → unit_price）。
+                # 不查就会「编译通过、运行 500」，必须在这里把漂移暴露出来。
+                # 增量修改链路（allow_migrate）只补「缺的列」，绝不删改已有列。
                 for entity in model.get("entities", []):
                     cursor.execute(
                         "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
                         "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
                         ("biz", entity["entity"]))
-                    existing = {row[0] for row in cursor.fetchall()}
+                    existing_columns = {row[0] for row in cursor.fetchall()}
                     expected = {f["column"] for f in entity["fields"]}
-                    missing = expected - existing
-                    if missing:
+                    missing = expected - existing_columns
+                    if not missing:
+                        continue
+                    if not self._allow_migrate:
                         raise RuntimeError(
                             f"表 {entity['entity']} 已存在且与模型不一致（缺列：{sorted(missing)}）。"
                             "可能是旧版本残留：请换实体名或手工 DROP 后重跑。")
+                    by_column = {f["column"]: f for f in entity["fields"]}
+                    for column in sorted(missing):
+                        cursor.execute(alter_sql(entity["entity"], by_column[column]))
+                        migrations.append(f"{entity['entity']}.{column}")
+            connection.commit()
         finally:
             connection.close()
-        result.record("③ 建表（biz）", True, f"{len(scripts)} 个脚本，{applied} 条语句")
+        detail = f"{len(scripts)} 个脚本，{applied} 条语句"
+        if migrations:
+            detail += f"；迁移加列 {len(migrations)}：{', '.join(migrations)}"
+            model_note = "（增量修改）"
+            result.record(f"③ 建表与迁移（biz）{model_note}", True, detail)
+        else:
+            result.record("③ 建表（biz）", True, detail)
+        result.migrations = migrations
         return created
 
     # --------------------------------------------------- 模型快照（明示扩展）
@@ -349,7 +370,7 @@ class Pipeline:
             self.step_mark_current(version, result)
             result.ok = True
             summary = {"version": version, "ok": True, "steps": [s.__dict__ for s in result.steps],
-                       "acceptance": report["summary"]}
+                       "acceptance": report["summary"], "migrations": result.migrations}
         except (GenerationCancelled, RepairCancelled):
             # RepairCancelled：修复循环（最长的一步）内部的取消，语义与边界取消一致
             result.ok = False
@@ -358,14 +379,15 @@ class Pipeline:
             result.record("✕ 取消", False, "用户取消，已停止后续步骤")
             summary = {"version": version, "ok": False, "failedStep": result.failed_step,
                        "steps": [s.__dict__ for s in result.steps], "error": "用户取消生成",
-                       "cancelled": True, "tablesCreated": created_tables}
+                       "cancelled": True, "tablesCreated": created_tables,
+                       "migrations": result.migrations}
         except Exception as error:
             result.ok = False
             result.failed_step = result.steps[-1].name if result.steps else "?"
             result.error = str(error)
             summary = {"version": version, "ok": False, "failedStep": result.failed_step,
                        "steps": [s.__dict__ for s in result.steps], "error": str(error),
-                       "tablesCreated": created_tables}
+                       "tablesCreated": created_tables, "migrations": result.migrations}
         finally:
             # 对话式生成成功后不关产物：新版本直接上线承接业务对话（运行时 5 节）。
             # 取消/失败都走这里停产物——已启动的进程不陪取消标志一起活着

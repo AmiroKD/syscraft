@@ -82,7 +82,13 @@ class GenerationFlow:
             session.append("user", "text", message)
             text = (message or "").strip()
             if text in CANCEL_PLAN:
+                # 取消即清场：计划文件不删会在 models/ 里留一堆没人认领的 plan.*.json
+                stale = session.get_slot("gen_model_path")
+                if stale:
+                    Path(stale).unlink(missing_ok=True)
+                session.set_slot("gen_model_path", None)
                 session.set_slot("gen_state", None)
+                session.set_slot("gen_mode", None)
                 reply = "已取消本次生成，需求没有落地。想重新开始直接描述即可。"
                 session.append("assistant", "text", reply)
                 return {"reply": reply}
@@ -98,7 +104,22 @@ class GenerationFlow:
             return await self._extract(session.get_slot("gen_requirement") or message,
                                        session, answers=[message])
 
-        # idle：先判生成意图，不是就交回业务模式（不落盘，业务图自己落）
+        # idle：先判「加字段」再判「建系统」——「给活动管理系统加个备注字段」
+        # 会同时命中两个正则，增量语义应当优先（改一个字段不该整版重生成）
+        from syscraft.requirement.amend import parse_amend
+        from syscraft.requirement.model_catalog import catalog as _catalog
+        amend = parse_amend(message, _catalog(online_only=True))
+        if amend is not None:
+            if (me or {}).get("roleCode") not in self.GENERATION_ROLES:
+                session.append("user", "text", message)
+                reply = ("修改系统结构需要管理员权限（当前角色无权触发）。\n"
+                         "你可以继续查询/登记现有数据；需要加字段请联系管理员。")
+                session.append("assistant", "text", reply)
+                return {"reply": reply}
+            session.append("user", "text", message)
+            return self._present_amend_plan(amend, session)
+
+        # idle：非加字段、非生成意图 → 交回业务模式（不落盘，业务图自己落）
         if not self.is_generation_intent(message):
             return None
         # 生成触发角色门槛（fail-closed）：命中意图但无权 → 落盘后拒绝
@@ -157,11 +178,67 @@ class GenerationFlow:
 
         session.set_slot("gen_model_path", str(model_path))
         session.set_slot("gen_state", "awaiting_plan")
+        session.set_slot("gen_mode", "create")
         entities = "、".join(e["display_name"] for e in model["entities"])
         reply = (f"需求已理解，将生成{len(model['entities'])}个实体：{entities}。\n\n"
                  f"{result.plan}\n\n确认无误请回复「确认生成」（版本号在确认时分配），要调整直接重新描述。")
         session.append("assistant", "plan", {"summary": reply, "version": "",
                                              "assumptions": result.assumptions})
+        return {"reply": reply}
+
+    def _present_amend_plan(self, request, session) -> dict:
+        """增量修改的计划：在在线版本模型上追加一个字段，确认后走迁移流水线。
+
+        与全量生成的差别只有两点：模型来源是「在线版本的模型原件」（不是重新抽取），
+        流水线打开 allow_migrate（对已存在的表 ALTER ADD COLUMN）。其余步骤完全复用——
+        同一套编译、验收、回滚，增量才不需要第二套质量保证。
+        """
+        from syscraft.requirement.amend import append_field, build_field, load_online_model
+        from syscraft.runtime.switcher import current_version
+
+        version = current_version()
+        model, _source = load_online_model(version)
+        if model is None:
+            reply = (f"当前在线版本 {version or '未知'} 没有留下模型原件，无法做字段级增量。\n"
+                     "可以整版重新描述需求生成。")
+            session.append("assistant", "text", reply)
+            return {"reply": reply}
+        entity = next((e for e in model.get("entities", [])
+                       if e["entity"] == request.entity.entity), None)
+        if entity is None:
+            reply = f"在线版本里没有「{request.entity.display_name}」这张表，无法加字段。"
+            session.append("assistant", "text", reply)
+            return {"reply": reply}
+
+        existing = {f["column"] for f in entity.get("fields", [])}
+        spec = build_field(request.field_text, existing)
+        problem = append_field(model, entity["entity"], spec)
+        if problem:
+            session.append("assistant", "text", problem)
+            return {"reply": problem}
+
+        plan_id = uuid.uuid4().hex[:12]
+        model["model_version"] = ""  # 确认时分配
+        plan_path = config.MODELS_DIR / f"plan.{plan_id}.json"
+        plan_path.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._sweep_plans()
+
+        session.set_slot("gen_model_path", str(plan_path))
+        session.set_slot("gen_state", "awaiting_plan")
+        session.set_slot("gen_mode", "amend")
+        type_label = spec.type
+        if spec.length:
+            type_label += f"({spec.length})"
+        elif spec.precision:
+            type_label += f"({spec.precision},{spec.scale})"
+        reply = (f"将在「{entity['display_name']}」新增字段：{spec.semantic}"
+                 f"（列名 {spec.column}，类型 {type_label}，允许为空，存量数据不受影响）。\n\n"
+                 "确认后执行：ALTER TABLE 加列 → 新版本重渲染 → 编译 → 上线 → 自动验收，约 2 分钟。\n"
+                 "确认请回复「确认生成」；取消回复「取消」。")
+        session.append("assistant", "plan", {
+            "summary": reply, "version": "", "kind": "amend",
+            "field": {"column": spec.column, "type": type_label, "semantic": spec.semantic},
+        })
         return {"reply": reply}
 
     @staticmethod
@@ -206,6 +283,7 @@ class GenerationFlow:
         # 全平台 /api/chat 从此 503，只能重启进程（审查 P0：模型文件损坏即触发）
         try:
             model = json.loads(model_path.read_text(encoding="utf-8"))
+            amend_mode = session.get_slot("gen_mode") == "amend"
             version = str(model.get("model_version") or "")
             if not version:
                 version = _next_version()
@@ -229,6 +307,7 @@ class GenerationFlow:
         except Exception:
             generation_lock.release()
             session.set_slot("gen_state", None)
+            session.set_slot("gen_mode", None)
             raise
 
         async def task():
@@ -240,7 +319,8 @@ class GenerationFlow:
                         {"type": "phase", "step": name, "ok": ok, "detail": detail}),
                     keep_running=True,
                     should_cancel=self._cancel.is_set,
-                    on_event=emit)
+                    on_event=emit,
+                    allow_migrate=amend_mode)
                 result = await asyncio.to_thread(pipeline.run, model_path)
                 if result.ok:
                     from syscraft.requirement.model_catalog import reset_catalog_cache
@@ -263,6 +343,7 @@ class GenerationFlow:
                 self._running_owner = None
                 self._cancel.clear()
                 session.set_slot("gen_state", None)
+                session.set_slot("gen_mode", None)
 
         asyncio.create_task(task())
         return {"reply": reply}

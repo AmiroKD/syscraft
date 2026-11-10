@@ -185,6 +185,12 @@ public class {{ class_name }}Service {
         // 必须在 validate 之前——owner 列的非空校验会先跑（实测踩过顺序）
         entity.set{{ owner_getter }}(rowScope.currentUserId());
 {% endif %}
+{% if created_at_getter %}
+        // 创建时间由系统填：调用方（对话层/前端）不需要也不应该关心这个字段
+        if (entity.get{{ created_at_getter }}() == null) {
+            entity.set{{ created_at_getter }}(java.time.LocalDateTime.now());
+        }
+{% endif %}
         validate(entity);
 {% if computed_rules %}
         applyComputed(entity);

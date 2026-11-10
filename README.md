@@ -65,6 +65,23 @@ PYTHONPATH=src .venv/bin/python -m syscraft.codegen.generator --model models/tra
 
 Maven 按 `mvn`（PATH）→ `MAVEN_HOME` → `~/.m2/wrapper` 三级定位，不依赖某台机器的哈希目录。
 
+## 增量修改（加字段）
+
+在对话里直接说，例如：
+
+```
+给活动加一个备注字段
+```
+
+系统会先出一份计划（列名/类型/是否可空），回复「确认生成」后执行：
+`ALTER TABLE 加列 → 新版本重渲染 → 编译 → 上线 → 自动验收`，失败自动回滚旧版本。
+
+- 只支持**加列**（`ADD COLUMN ... NULL DEFAULT NULL`，对存量数据零影响）；
+  删列、改类型、改名不在最小演化范围内——它们不可逆，需要专门的数据迁移设计；
+- 新字段一律可空；列名冲突时用字母后缀（`remark_b`），不用数字——
+  数字后缀的 property 还原不回列名（`remark_2` → `remark2`），会让整个实体查询 500；
+- 计划文件是 `models/plan.{id}.json`，确认时才分配版本号并转正为 `auto_gen.vN.json`。
+
 ## 冒烟自检
 
 ```bash

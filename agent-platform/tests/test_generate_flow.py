@@ -50,6 +50,7 @@ class FakePipeline:
         FakePipeline.captured = kwargs
 
     def run(self, model_path):
+        FakePipeline.captured["model_path"] = str(model_path)
         self.captured["notify"]("④ 编译", True, "8 个文件")
         return SimpleNamespace(ok=True, failed_step=None,
                                steps=[SimpleNamespace(ok=True, detail="9/9 通过", name="x")])
@@ -119,10 +120,10 @@ async def test_clarification_then_answer_then_plan(store, env):
     # 回答轮的入参：需求还是原话，回答是用户消息
     requirement, answers = FAKE_CALLS[-1]
     assert requirement == "做一个图书管理系统" and answers == ["按默认的来"]
-    # 模型文件落盘且版本号已写入
+    # 计划文件落盘，但版本号留到确认时才分配（抽取阶段不持锁，提前算号会撞车）
     model_path = Path(session.get_slot("gen_model_path"))
-    assert model_path.exists()
-    assert json.loads(model_path.read_text(encoding="utf-8"))["model_version"].startswith("v")
+    assert model_path.exists() and model_path.name.startswith("plan.")
+    assert json.loads(model_path.read_text(encoding="utf-8"))["model_version"] == ""
 
 
 @pytest.mark.anyio
@@ -162,6 +163,48 @@ async def test_pipeline_runs_and_emits_events(store, env, monkeypatch):
     assert "phase" in kinds and "text" in kinds
     # keep_running 已传给流水线：新版本要留在 8080 承接业务
     assert FakePipeline.captured.get("keep_running") is True
+    # 版本号在确认时分配，计划文件转正成 auto_gen.vN.json，内容是分配后的模型
+    final_path = Path(FakePipeline.captured["model_path"])
+    assert final_path.name.startswith("auto_gen.v")
+    assert json.loads(final_path.read_text(encoding="utf-8"))["model_version"].startswith("v")
+    assert not list((env / "models").glob("plan.*.json"))
+
+
+# ---------------------------------------------------------------- 并发与失败路径
+
+@pytest.mark.anyio
+async def test_two_sessions_get_isolated_plan_files(store, env):
+    """两个会话同时描述需求时不能写同一个文件：版本号确认时才分配，
+    计划文件名按 plan_id 隔离（审查 P1：后写覆盖前写 → 确认时跑错模型）。"""
+    FAKE_EXTRACTOR_SCRIPT.extend([[PLAN_RESULT], [PLAN_RESULT]])
+    flow = GenerationFlow(client=None)
+    first, second = store.create(user_id=1), store.create(user_id=2)
+
+    await flow.handle("做一个图书管理系统", "tk", first, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
+    await flow.handle("做一个图书管理系统", "tk", second, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
+
+    path_a = Path(first.get_slot("gen_model_path"))
+    path_b = Path(second.get_slot("gen_model_path"))
+    assert path_a != path_b and path_a.exists() and path_b.exists()
+
+
+@pytest.mark.anyio
+async def test_corrupt_plan_releases_generation_lock(store, env, monkeypatch):
+    """模型文件损坏时 _run_pipeline 必须释放全局锁：否则全平台永久 503（审查 P0）。"""
+    from syscraft.conversation.stream_hub import generation_lock
+
+    flow = GenerationFlow(client=None)
+    session = store.create(user_id=1)
+    broken = env / "models" / "plan.broken.json"
+    broken.write_text("{ this is not json", encoding="utf-8")
+    session.set_slot("gen_model_path", str(broken))
+    session.set_slot("gen_state", "awaiting_plan")
+
+    with pytest.raises(Exception):
+        await flow._run_pipeline(session, lambda e: None)
+
+    assert not generation_lock.locked()  # 锁已释放，后续会话还能生成
+    assert session.get_slot("gen_state") is None
 
 
 # ---------------------------------------------------------------- 角色门槛（P0-2）

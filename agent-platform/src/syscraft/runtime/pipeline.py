@@ -109,10 +109,14 @@ class Pipeline:
     # ------------------------------------------------------------------ ③建表
 
     def step_apply_ddl(self, version: str, model: dict, result: PipelineResult) -> list[str]:
-        """返回本次实际建表清单（取消/失败时报告里可见，孤儿表清理有据可查）。"""
+        """返回本次实际新建的表（取消/失败进报告，孤儿表清理有据可查）。
+
+        必须在执行前先查一遍 information_schema：CREATE TABLE IF NOT EXISTS
+        对已存在的表是空操作，把模型里的实体全算成「本次创建」会让失败报告
+        给出错误的清理清单。"""
         ddl_dir = self.root / "workspace/scripts/ddl"
         scripts = sorted(ddl_dir.glob(f"{version}_*.sql"))
-        created = [entity["entity"] for entity in model.get("entities", [])]
+        created: list[str] = []
         connection = pymysql.connect(
             host="127.0.0.1", port=3306,
             user=os.environ.get("MCP_USER", ""), password=os.environ.get("MCP_PWD", ""),
@@ -121,6 +125,12 @@ class Pipeline:
         applied = 0
         try:
             with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s",
+                    ("biz",))
+                existing = {row[0] for row in cursor.fetchall()}
+                created = [entity["entity"] for entity in model.get("entities", [])
+                           if entity["entity"] not in existing]
                 for script in scripts:
                     for statement in _statements(script):
                         cursor.execute(statement)
@@ -404,9 +414,31 @@ def _statements(script: Path) -> list[str]:
     return [s.strip() for s in body.split(";") if s.strip()]
 
 
+def _maven_command() -> str:
+    """定位 mvn，按「显式配置 → PATH → 本机 wrapper」三级回退。
+
+    不能写死 ~/.m2/wrapper/dists/... 下的哈希目录：那是本机产物，
+    换一台机器（答辩机/评委复现环境）路径不存在，subprocess 直接
+    FileNotFoundError，流水线在编译步炸掉且报错与真实原因无关。"""
+    for env_name in ("MAVEN_HOME", "M2_HOME"):
+        home = os.environ.get(env_name)
+        if home:
+            candidate = Path(home) / "bin" / ("mvn.cmd" if os.name == "nt" else "mvn")
+            if candidate.exists():
+                return str(candidate)
+    found = shutil.which("mvn")
+    if found:
+        return found
+    wrappers = sorted(Path.home().glob(".m2/wrapper/dists/apache-maven-*/**/bin/mvn"))
+    for candidate in reversed(wrappers):
+        if candidate.exists():
+            return str(candidate)
+    raise RuntimeError("未找到 Maven：请把 mvn 加入 PATH，或设置 MAVEN_HOME 指向 Maven 安装目录")
+
+
 def _maven_build(version_dir: Path) -> tuple[bool, str]:
-    maven = shutil.which("mvn") or Path.home() / ".m2/wrapper/dists/apache-maven-3.9.12/57e1dc81/bin/mvn"
-    process = subprocess.run([str(maven), "-B", "-q", "package", "-DskipTests"],
+    maven = _maven_command()
+    process = subprocess.run([maven, "-B", "-q", "package", "-DskipTests"],
                              cwd=version_dir, capture_output=True, text=True, timeout=600)
     return process.returncode == 0, (process.stdout + process.stderr)[-4000:]
 

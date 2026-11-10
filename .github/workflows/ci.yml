@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    name: 平台单测（Python 3.12）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent-platform/requirements.lock
+      - name: 安装依赖
+        run: pip install -r requirements.lock
+      - name: 单元测试
+        run: python -m pytest tests -q
+        env:
+          PYTHONPATH: src
+
+  java:
+    name: 产物骨架编译（Java 21）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spring-skeleton
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: 编译
+        run: mvn -B -q package -DskipTests

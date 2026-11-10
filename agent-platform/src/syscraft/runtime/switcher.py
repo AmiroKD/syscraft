@@ -31,8 +31,12 @@ class SwitchError(Exception):
     pass
 
 
-def list_versions() -> list[dict]:
-    """workspace/versions 下的全部版本；built=jar 已构建，current=正在运行。"""
+def list_versions(include_unbuilt: bool = False) -> list[dict]:
+    """workspace/versions 下的版本；built=jar 已构建，current=正在运行。
+
+    默认不返回没有 jar 的空壳目录：回归/验收测试的残留（r1、tx15488 之类）会把
+    版本清单变成垃圾场，超管看着一堆陌生名字不知道该点哪个。当前运行版本例外，
+    它必须出现在清单里。"""
     current = _current_version()
     result = []
     versions_dir = config.PROJECT_ROOT / "workspace/versions"
@@ -42,7 +46,10 @@ def list_versions() -> list[dict]:
         if not path.is_dir():
             continue
         jar = path / "target/syscraft-skeleton-0.1.0.jar"
-        result.append({"version": path.name, "built": jar.exists(),
+        built = jar.exists()
+        if not built and not include_unbuilt and current != path.name:
+            continue
+        result.append({"version": path.name, "built": built,
                        "current": current == path.name})
     return result
 

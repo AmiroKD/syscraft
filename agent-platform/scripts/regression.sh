@@ -4,7 +4,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY=".venv/bin/python"
-MAVEN="$(ls "$HOME"/.m2/wrapper/dists/apache-maven-*/[0-9a-f]*/bin/mvn 2>/dev/null | head -1 || echo mvn)"
+# 与运行时流水线同一套定位：PATH → MAVEN_HOME → 本机 wrapper 兜底。
+# 不能写死 wrapper 里的哈希目录——换一台机器就不存在，回归矩阵会假失败。
+if command -v mvn > /dev/null 2>&1; then
+  MAVEN="$(command -v mvn)"
+elif [ -n "${MAVEN_HOME:-}" ] && [ -x "${MAVEN_HOME}/bin/mvn" ]; then
+  MAVEN="${MAVEN_HOME}/bin/mvn"
+else
+  MAVEN="$(find "$HOME/.m2/wrapper/dists" -maxdepth 6 -path '*/bin/mvn' -type f 2>/dev/null | head -1)"
+fi
+: "${MAVEN:?未找到 Maven：请把 mvn 加入 PATH，或设置 MAVEN_HOME}"
 
 for entry in "r1_single:r1" "r2_one_to_many:r2" "r3_rules:r3"; do
   file="${entry%%:*}"; version="${entry##*:}"

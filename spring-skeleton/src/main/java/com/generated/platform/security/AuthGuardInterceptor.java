@@ -16,15 +16,20 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class AuthGuardInterceptor implements HandlerInterceptor {
 
     private final PermVersionGuard permVersionGuard;
+    private final SessionService sessionService;
 
-    public AuthGuardInterceptor(PermVersionGuard permVersionGuard) {
+    public AuthGuardInterceptor(PermVersionGuard permVersionGuard, SessionService sessionService) {
         this.permVersionGuard = permVersionGuard;
+        this.sessionService = sessionService;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         StpUtil.checkLogin();
         permVersionGuard.check();
+        // 会话吊销校验 + 节流活跃登记（底座扩展 v0.1）。
+        // 排在版本比对之后：被吊销的会话也该看到「请重新登录」而不是「无权限」
+        sessionService.checkAndTouch(StpUtil.getTokenValue());
         return true;
     }
 }

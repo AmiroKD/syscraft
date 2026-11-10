@@ -111,3 +111,15 @@ class SpringClient:
             token, request_id=uuid.uuid4().hex,
         )
         return body["data"]
+
+    async def report_feature_request(self, raw_text: str, wanted_entity: str | None,
+                                     token: str) -> dict[str, Any]:
+        """需求池上报（底座扩展 v0.1）：记录「用户要了但系统没有」的能力。
+
+        走平台管理 API（/api/feature-requests）而非直连 adm——权限 6 节的
+        物理不可达约束不因新功能破例。携幂等键：超时重试不双报。
+        """
+        body = await self._post("/api/feature-requests",
+                                {"rawText": raw_text, "wantedEntity": wanted_entity},
+                                token, request_id=uuid.uuid4().hex)
+        return body["data"]

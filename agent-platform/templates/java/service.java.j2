@@ -261,12 +261,12 @@ public class {{ class_name }}Service {
     private void validate({{ class_name }} e) {
 {% for c in not_null_checks %}
         if ({{ c.condition }}) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "{{ c.message }}");
+            throw new BizException(ErrorCode.BAD_REQUEST, "{{ c.message | java_str }}");
         }
 {% endfor %}
 {% for c in constraints %}
         if ({{ c.condition }}) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "{{ c.message }}");
+            throw new BizException(ErrorCode.BAD_REQUEST, "{{ c.message | java_str }}");
         }
 {% endfor %}
 {% if not not_null_checks and not constraints %}

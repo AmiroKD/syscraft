@@ -21,6 +21,7 @@ import re
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Callable
 
@@ -141,20 +142,39 @@ class GenerationFlow:
         return self._present_plan(result, session)
 
     def _present_plan(self, result, session) -> dict:
+        """把抽取结果落成一份待确认的计划。
+
+        版本号不在这里分配：抽取阶段不持生成锁，两个会话并发描述需求时会算到
+        同一个 vN、写同一个 auto_gen.vN.json，后写覆盖前写——先确认的人跑的是
+        别人的模型。版本号改到 _run_pipeline 持锁后分配，计划文件用 plan_id 隔离。
+        """
         model = result.model
-        version = _next_version()
-        model["model_version"] = version
-        model_path = config.MODELS_DIR / f"auto_gen.{version}.json"
+        plan_id = uuid.uuid4().hex[:12]
+        model["model_version"] = ""  # 确认时分配，见 _run_pipeline
+        model_path = config.MODELS_DIR / f"plan.{plan_id}.json"
         model_path.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._sweep_plans()
 
         session.set_slot("gen_model_path", str(model_path))
         session.set_slot("gen_state", "awaiting_plan")
         entities = "、".join(e["display_name"] for e in model["entities"])
-        reply = (f"需求已理解，将生成{len(model['entities'])}个实体：{entities}（版本 {version}）。\n\n"
-                 f"{result.plan}\n\n确认无误请回复「确认生成」，要调整直接重新描述。")
-        session.append("assistant", "plan", {"summary": reply, "version": version,
+        reply = (f"需求已理解，将生成{len(model['entities'])}个实体：{entities}。\n\n"
+                 f"{result.plan}\n\n确认无误请回复「确认生成」（版本号在确认时分配），要调整直接重新描述。")
+        session.append("assistant", "plan", {"summary": reply, "version": "",
                                              "assumptions": result.assumptions})
         return {"reply": reply}
+
+    @staticmethod
+    def _sweep_plans(max_age_seconds: int = 86400) -> None:
+        """清掉一天前没人确认的计划文件。误触生成意图会留 plan.*.json，
+        不回收的话 models/ 会变成垃圾场（版本号扫描也会越来越慢）。"""
+        cutoff = time.time() - max_age_seconds
+        for path in config.MODELS_DIR.glob("plan.*.json"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                continue
 
     # ---------------------------------------------------------------- 取消
 
@@ -182,17 +202,34 @@ class GenerationFlow:
         if generation_lock.locked():
             return {"reply": "另一个会话正在生成系统，请稍后再试。"}
         await generation_lock.acquire()
-        session.set_slot("gen_state", "running")
-        version = json.loads(model_path.read_text(encoding="utf-8"))["model_version"]
-        reply = f"开始生成（版本 {version}），全程约 2 分钟，进度见下方事件。"
-        session.append("assistant", "text", reply)
-
+        # 锁一旦拿到，初始化段的任何异常都必须自己释放：否则全局锁永久占用，
+        # 全平台 /api/chat 从此 503，只能重启进程（审查 P0：模型文件损坏即触发）
         try:
-            me = session.meta().get("user_id")
-            self._running_owner = int(me) if me is not None else None
-        except (TypeError, ValueError):
-            self._running_owner = None
-        self._cancel.clear()
+            model = json.loads(model_path.read_text(encoding="utf-8"))
+            version = str(model.get("model_version") or "")
+            if not version:
+                version = _next_version()
+                model["model_version"] = version
+                # 计划文件转正：版本号进内容也进文件名，审计与手工复跑都靠它
+                target = config.MODELS_DIR / f"auto_gen.{version}.json"
+                target.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+                model_path.unlink(missing_ok=True)
+                model_path = target
+                session.set_slot("gen_model_path", str(model_path))
+            session.set_slot("gen_state", "running")
+            reply = f"开始生成（版本 {version}），全程约 2 分钟，进度见下方事件。"
+            session.append("assistant", "text", reply)
+
+            try:
+                me = session.meta().get("user_id")
+                self._running_owner = int(me) if me is not None else None
+            except (TypeError, ValueError):
+                self._running_owner = None
+            self._cancel.clear()
+        except Exception:
+            generation_lock.release()
+            session.set_slot("gen_state", None)
+            raise
 
         async def task():
             try:

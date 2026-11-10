@@ -32,6 +32,18 @@ public class UserEntity {
     /** 1=下次登录必须改密 */
     private Integer mustChangePassword;
 
+    /** 连续登录失败计数，成功即清零；达阈值触发 locked_until */
+    private Integer failedAttempts;
+
+    /** 锁定截止时刻；非空且在未来则拒绝登录（落库防重启失忆） */
+    private LocalDateTime lockedUntil;
+
+    /** 最近一次成功登录时间 */
+    private LocalDateTime lastLoginAt;
+
+    /** 最近一次成功登录来源 IP */
+    private String lastLoginIp;
+
     private Long createdBy;
 
     private LocalDateTime createdAt;
@@ -92,6 +104,38 @@ public class UserEntity {
 
     public void setMustChangePassword(Integer mustChangePassword) {
         this.mustChangePassword = mustChangePassword;
+    }
+
+    public Integer getFailedAttempts() {
+        return failedAttempts;
+    }
+
+    public void setFailedAttempts(Integer failedAttempts) {
+        this.failedAttempts = failedAttempts;
+    }
+
+    public LocalDateTime getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public void setLockedUntil(LocalDateTime lockedUntil) {
+        this.lockedUntil = lockedUntil;
+    }
+
+    public LocalDateTime getLastLoginAt() {
+        return lastLoginAt;
+    }
+
+    public void setLastLoginAt(LocalDateTime lastLoginAt) {
+        this.lastLoginAt = lastLoginAt;
+    }
+
+    public String getLastLoginIp() {
+        return lastLoginIp;
+    }
+
+    public void setLastLoginIp(String lastLoginIp) {
+        this.lastLoginIp = lastLoginIp;
     }
 
     public Long getCreatedBy() {

@@ -22,7 +22,7 @@ code/
 │   ├── templates/         # 代码模板（修复循环不可写）
 │   ├── tests/
 │   └── workspace/         # 运行期产物（不进版本库）
-└── spring-skeleton/       # Java 固定骨架：platform/ 31 个类
+└── spring-skeleton/       # Java 固定骨架：platform/ 96 个类
     └── src/main/java/com/generated/platform/
 ```
 
@@ -33,8 +33,11 @@ code/
 ```bash
 cd agent-platform
 uv venv --python 3.12
-uv pip install --python .venv/bin/python jinja2 httpx   # 其余依赖见 requirements.txt
+uv pip install -r requirements.lock --python .venv/bin/python
 ```
+
+依赖分两份：`requirements.txt` 只写意图（允许升级），`requirements.lock` 锁死补丁版本
+（答辩/复现按这份装，行为才可重复）。
 
 数据库凭证不在仓库里：
 
@@ -42,32 +45,34 @@ uv pip install --python .venv/bin/python jinja2 httpx   # 其余依赖见 requir
 set -a; source ~/.adaptive/db.env; set +a   # 少了 set -a，Java 读不到 APP_PWD
 ```
 
-## 一次完整生成（当前已跑通的最窄链路）
+## 一次完整生成（一条命令）
 
 ```bash
 cd agent-platform
 
-# ① 渲染：模型 → workspace/versions/v{n}/ 完整工程 + DDL + 快照 + 验收清单
-PYTHONPATH=src .venv/bin/python -m syscraft.codegen.generator --model models/trade_order.v1.json
-
-# ② 建业务表（mcp 账号，biz 库）与默认授权（app 账号，adm 库）
-#    结构快照不在这里写：产物启动时从 biz 的 information_schema 自查导出到 adm
-mysql -u"$MCP_USER" -p"$MCP_PWD" biz < workspace/scripts/ddl/v1_001_trade_order.sql
-mysql -u"$APP_USER" -p"$APP_PWD" adm < workspace/scripts/grants/v1_001_trade_order.sql
-
-# ③ 编译并启动
-cd workspace/versions/v1
-~/.m2/wrapper/dists/apache-maven-3.9.12/57e1dc81/bin/mvn -q package -DskipTests
-env -u SERVER__PORT java -jar target/syscraft-skeleton-0.1.0.jar --server.port=8080
-
-# ④ 验收（另开一个终端；验收账号先建好，口令放环境变量 ACC_ADMIN_PWD / ACC_USER_PWD）
-cd agent-platform
-PYTHONPATH=src .venv/bin/python -m syscraft.runtime.acceptance \
-  --base-url http://127.0.0.1:8080 --spec templates/acceptance/v1.json \
-  --report workspace/logs/acceptance-v1.json
+# 一条命令：停旧产物 → 渲染 → 建表 → 编译（失败进修复循环）→ 启动
+#           → 模型快照 → 默认授权 → 自动验收 → 版本登记 → 失败自动回滚
+PYTHONPATH=src .venv/bin/python -m syscraft.runtime.pipeline --model models/trade_order.v1.json
 ```
 
 生成器拒绝覆盖已存在的版本目录：换 `model_version` 或先手工删除。
+
+只跑渲染（不碰数据库、不编译）：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m syscraft.codegen.generator --model models/trade_order.v1.json
+```
+
+Maven 按 `mvn`（PATH）→ `MAVEN_HOME` → `~/.m2/wrapper` 三级定位，不依赖某台机器的哈希目录。
+
+## 冒烟自检
+
+```bash
+./scripts/smoke.sh                  # 健康 → 登录 → 版本清单 → 一次只读查询
+./scripts/smoke.sh "查一下活动"      # 换一句只读问题
+```
+
+退出码非 0 即冒烟失败，答辩前跑一遍比人工点页面可靠。
 
 ## 对话链路（§5 第 5 步，最窄）
 

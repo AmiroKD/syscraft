@@ -5,7 +5,8 @@
 --       《平台骨架接口清单 v1.0》5 核销三态机、9.1 审计两段式
 --       《元数据模型与能力目录 v0.4》3.1 / 3.2 快照字段
 --
--- 做什么：12 张 adm_ 表 + 三个内置角色 + 默认能力矩阵 + 超管账号 + 单行状态记录
+-- 做什么：16 张 adm_ 表（12 基础 + adm_model_config + 底座扩展 v0.1 三表）+ 三个内置角色
+--       + 默认能力矩阵 + 超管账号 + 单行状态记录
 -- 不做什么：不建 biz 库业务表（由生成流程负责）；不写快照数据（首次生成成功后导出）
 --
 -- 幂等：建表一律 IF NOT EXISTS，种子一律 INSERT IGNORE。
@@ -68,6 +69,10 @@ CREATE TABLE IF NOT EXISTS adm_user (
     enabled              TINYINT         NOT NULL DEFAULT 1      COMMENT '停用即拒绝登录，并使 perm_version 自增',
     perm_version         INT             NOT NULL DEFAULT 0      COMMENT '权限版本；改角色/改角色能力/停用用户时自增，令牌版本不符即失效',
     must_change_password TINYINT         NOT NULL DEFAULT 0      COMMENT '1=下次登录必须改密（初始账号、超管重置后）',
+    failed_attempts      INT             NOT NULL DEFAULT 0      COMMENT '连续登录失败计数，成功即清零；达阈值触发 locked_until',
+    locked_until         DATETIME        NULL                    COMMENT '锁定截止时刻；非空且在未来则拒绝登录（落库防重启失忆，接口清单 9.5）',
+    last_login_at        DATETIME        NULL                    COMMENT '最近一次成功登录时间',
+    last_login_ip        VARCHAR(64)     NULL                    COMMENT '最近一次成功登录来源 IP',
     created_by           BIGINT UNSIGNED NULL                    COMMENT '创建人 user_id，系统初始化为 NULL',
     created_at           DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at           DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -100,6 +105,7 @@ CREATE TABLE IF NOT EXISTS adm_table_grant (
     entity       VARCHAR(64)           NOT NULL       COMMENT '业务表名，与 adm_entity_snapshot.entity 一致',
     access       ENUM ('READ', 'READ_WRITE', 'FULL') NOT NULL COMMENT '档位：只读 / 读写 / 读写删',
     granted_by   BIGINT UNSIGNED       NULL           COMMENT '授出人 user_id；系统随生成写入时为 NULL',
+    expires_at   DATETIME              NULL           COMMENT '过期时间；NULL=永久。到期由权限码解析过滤 + 定时清扫回收（底座扩展 v0.1）',
     created_at   DATETIME              NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME              NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -324,9 +330,75 @@ INSERT IGNORE INTO adm_model_config (id, provider, base_url, model)
 VALUES (1, 'openai', 'https://api.openai.com/v1', 'gpt-4o-mini');
 
 -- ============================================================================
+-- 七、底座扩展 v0.1（2026-11-10）：需求池 / 登录安全落库 / 会话登记
+--     与《底座扩展设计 v0.1》对应；纯加法扩展，不动九能力 ENUM 与八字段类型。
+--     存量库的迁移脚本：workspace/scripts/adm/20261110_adm_extension.sql
+-- ============================================================================
+
+-- 14. adm_feature_request 需求池
+--     来源：对话兜底卡片（P1-1）自动上报 + 管理端手工录入。
+--     状态机：OPEN → ACCEPTED（采纳，等待生成）/ REJECTED（婉拒，带原因）
+--             ACCEPTED → DONE（对应系统生成上线后归档）
+CREATE TABLE IF NOT EXISTS adm_feature_request (
+    id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '需求主键',
+    user_id       BIGINT UNSIGNED NULL     COMMENT '提出人；系统来源可为空',
+    raw_text      VARCHAR(500)    NOT NULL COMMENT '需求原话，超长截断',
+    wanted_entity VARCHAR(64)     NULL     COMMENT '对话中模型试图调用的实体名，可空',
+    source        VARCHAR(32)     NOT NULL DEFAULT 'CHAT_FALLBACK' COMMENT '来源：CHAT_FALLBACK/ADMIN/OTHER',
+    status        ENUM ('OPEN','ACCEPTED','REJECTED','DONE') NOT NULL DEFAULT 'OPEN' COMMENT '处理状态',
+    handled_by    BIGINT UNSIGNED NULL     COMMENT '处理人 user_id',
+    handled_at    DATETIME        NULL     COMMENT '处理时间',
+    note          VARCHAR(500)    NULL     COMMENT '处理备注：拒绝原因 / 采纳去向',
+    created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_fr_status (status, created_at),
+    KEY idx_fr_user (user_id, created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '需求池';
+
+-- 15. adm_login_attempt 登录尝试审计
+--     每次登录尝试一行（成功/失败都记）。爆破来源可回溯 IP 与 UA。
+--     与 adm_audit 分开：登录是高频前置动作，混进业务审计会淹没主链路。
+CREATE TABLE IF NOT EXISTS adm_login_attempt (
+    id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    username    VARCHAR(64)     NOT NULL COMMENT '尝试的登录名（含不存在的用户名，防枚举取证）',
+    user_id     BIGINT UNSIGNED NULL     COMMENT '命中用户；用户名不存在时为空',
+    success     TINYINT         NOT NULL DEFAULT 0 COMMENT '1=登录成功',
+    fail_reason VARCHAR(128)    NULL     COMMENT '失败原因（口令错误/已锁定/已停用）',
+    ip          VARCHAR(64)     NULL     COMMENT '来源 IP',
+    user_agent  VARCHAR(255)    NULL     COMMENT '客户端 UA，截断至 255',
+    created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_la_username_time (username, created_at),
+    KEY idx_la_time (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '登录尝试审计';
+
+-- 16. adm_session 会话登记
+--     JWT 保持无状态（StpLogicJwtForStateless 不动），本表只做三件事：
+--     ① 在线可见；② 强制下线触发器（置 revoked + bump perm_version 双保险）；
+--     ③ last_active 活跃度信号（节流更新，一分钟至多落库一次）。
+--     只存令牌 SHA-256，不存明文——与 adm_confirm_token 同一纪律。
+CREATE TABLE IF NOT EXISTS adm_session (
+    id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id        BIGINT UNSIGNED NOT NULL COMMENT '会话归属用户',
+    token_hash     CHAR(64)        NOT NULL COMMENT '令牌 SHA-256 十六进制；明文不入库',
+    ip             VARCHAR(64)     NULL,
+    user_agent     VARCHAR(255)    NULL,
+    created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_active_at DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近活跃；节流更新',
+    revoked        TINYINT         NOT NULL DEFAULT 0 COMMENT '1=已吊销（管理员强制下线）',
+    revoked_at     DATETIME        NULL,
+    revoked_by     BIGINT UNSIGNED NULL COMMENT '执行下线的管理员 user_id',
+    revoked_reason VARCHAR(128)    NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_session_token (token_hash),
+    KEY idx_session_user (user_id, last_active_at),
+    KEY idx_session_active (revoked, last_active_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '会话登记';
+
+-- ============================================================================
 -- 六、验收查询（只作说明，不自动执行；手工跑这四条即可核对）
 --
---   -- ① 表数量应为 12
+--   -- ① 表数量应为 16
 --   SELECT COUNT(*) AS tables FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'adm';
 --
 --   -- ② 三角色能力条数应为 9 / 7 / 3

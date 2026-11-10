@@ -88,6 +88,9 @@ public class GrantService {
         if (entitySnapshotMapper.selectById(entity) == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "结构快照里没有这张表：" + entity);
         }
+        if (request.expiresAt() != null && !request.expiresAt().isAfter(java.time.LocalDateTime.now())) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "expiresAt 必须是未来时刻");
+        }
         requireSubjectBelowOperator(operator, subjectType, request.subjectId());
 
         TableGrantEntity existing = grantMapper.selectOne(Wrappers.<TableGrantEntity>lambdaQuery()
@@ -102,10 +105,13 @@ public class GrantService {
             existing.setEntity(entity);
             existing.setAccess(access);
             existing.setGrantedBy(operator.userId());
+            existing.setExpiresAt(request.expiresAt());
             grantMapper.insert(existing);
         } else {
             existing.setAccess(access);
             existing.setGrantedBy(operator.userId());
+            // 重复授予是覆盖：expiresAt 也覆盖（传 null 即改为永久，语义在契约里写明）
+            existing.setExpiresAt(request.expiresAt());
             grantMapper.updateById(existing);
         }
 
@@ -225,6 +231,6 @@ public class GrantService {
 
     private GrantView toView(TableGrantEntity grant) {
         return new GrantView(grant.getId(), grant.getSubjectType(), grant.getSubjectId(),
-                grant.getEntity(), grant.getAccess(), grant.getGrantedBy());
+                grant.getEntity(), grant.getAccess(), grant.getGrantedBy(), grant.getExpiresAt());
     }
 }

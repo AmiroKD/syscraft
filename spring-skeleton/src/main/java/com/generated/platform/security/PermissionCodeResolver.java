@@ -153,9 +153,12 @@ public class PermissionCodeResolver {
 
     /** 其余角色：有效授权按实体取最强档位，再与角色能力求交 */
     private List<String> expandGrants(UserEntity user, RoleEntity role, Set<String> capabilities) {
+        // 过期授权不进权限码（底座扩展 v0.1）：即使清扫任务没跑，权限也即刻收口；
+        // 清扫只负责物理删行。IS NULL OR expires_at > NOW 两个分支缺一不可。
         List<TableGrantEntity> grants = tableGrantMapper.selectList(Wrappers.<TableGrantEntity>query()
-                .and(w -> w.eq("subject_type", "ROLE").eq("subject_id", role.getId()))
-                .or(w -> w.eq("subject_type", "USER").eq("subject_id", user.getId())));
+                .and(w -> w.and(s -> s.eq("subject_type", "ROLE").eq("subject_id", role.getId()))
+                        .or(s -> s.eq("subject_type", "USER").eq("subject_id", user.getId())))
+                .and(w -> w.isNull("expires_at").or().gt("expires_at", java.time.LocalDateTime.now())));
 
         // 取并集而非「用户级覆盖角色级」：后者会让「单独收窄某个人」变成不可能（权限 4.4）
         Map<String, Integer> bestRankByEntity = new HashMap<>();

@@ -238,15 +238,27 @@ def render_entity(env: Environment, entity: dict, out_dir: Path, template_dir: s
     return written
 
 
+def _java_string(value) -> str:
+    """把任意文本转成可安全放进 Java 双引号字面量的形式。
+
+    校验层（schema_map）已经拒绝引号/反斜杠/控制字符，这里是第二道：
+    模板里所有来自模型或用户文本的字面量都过这个 filter，不让「上游某天
+    少校验一处」直接变成编译失败。"""
+    return (str(value).replace("\\", "\\\\").replace('"', '\\"')
+            .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
+
+
 def make_env(templates_dir: Path) -> Environment:
     # StrictUndefined：模板里写错变量名直接报错，而不是渲染出空字符串再让 javac 猜
-    return Environment(
+    env = Environment(
         loader=FileSystemLoader(str(templates_dir)),
         undefined=StrictUndefined,
         trim_blocks=True,
         lstrip_blocks=True,
         keep_trailing_newline=True,
     )
+    env.filters["java_str"] = _java_string
+    return env
 
 
 def _ensure_owner_field(entity: dict) -> None:

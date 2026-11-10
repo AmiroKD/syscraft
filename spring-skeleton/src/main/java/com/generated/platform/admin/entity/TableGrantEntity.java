@@ -27,6 +27,9 @@ public class TableGrantEntity {
 
     private Long grantedBy;
 
+    /** 过期时间；NULL=永久。到期由权限码解析过滤 + 定时清扫回收 */
+    private LocalDateTime expiresAt;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;
@@ -77,6 +80,14 @@ public class TableGrantEntity {
 
     public void setGrantedBy(Long grantedBy) {
         this.grantedBy = grantedBy;
+    }
+
+    public LocalDateTime getExpiresAt() {
+        return expiresAt;
+    }
+
+    public void setExpiresAt(LocalDateTime expiresAt) {
+        this.expiresAt = expiresAt;
     }
 
     public LocalDateTime getCreatedAt() {

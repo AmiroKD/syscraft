@@ -53,10 +53,32 @@ public final class AdminDtos {
             @NotBlank(message = "不能为空") String subjectType,
             @NotNull(message = "不能为空") Long subjectId,
             @NotBlank(message = "不能为空") String entity,
-            @NotBlank(message = "不能为空") String access) {
+            @NotBlank(message = "不能为空") String access,
+            LocalDateTime expiresAt) {
     }
 
     public record GrantView(Long id, String subjectType, Long subjectId, String entity,
-                            String access, Long grantedBy) {
+                            String access, Long grantedBy, LocalDateTime expiresAt) {
+    }
+
+    // ---------------- 底座扩展 v0.1：需求池 / 会话 ----------------
+
+    public record FeatureRequestView(Long id, Long userId, String username, String rawText,
+                                     String wantedEntity, String source, String status,
+                                     Long handledBy, String handledByName, LocalDateTime handledAt,
+                                     String note, LocalDateTime createdAt) {
+    }
+
+    public record FeatureRequestReport(@NotBlank(message = "不能为空") @Size(max = 500) String rawText,
+                                       @Size(max = 64) String wantedEntity) {
+    }
+
+    /** 婉拒必须带原因的校验在 Service 层（注解写不了跨字段比较） */
+    public record FeatureRequestHandleRequest(@NotBlank(message = "不能为空") String status,
+                                              @Size(max = 500) String note) {
+    }
+
+    public record SessionView(Long id, Long userId, String username, String ip,
+                              String userAgent, LocalDateTime createdAt, LocalDateTime lastActiveAt) {
     }
 }

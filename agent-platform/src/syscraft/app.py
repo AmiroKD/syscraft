@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections import OrderedDict
 
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -121,36 +122,47 @@ async def index():
 
 class _LoginThrottle:
     """登录失败限速（P1-4）：同名+来源 5 次失败锁 5 分钟。内存态、单机语义内自洽——
-    多实例部署应换集中存储（记入设计边界）。成功登录即清零。"""
+    多实例部署应换集中存储（记入设计边界）。成功登录即清零。
+
+    超限淘汰必须是「逐条 LRU」而不是整体清空：整体清空会把已锁定账号的计数
+    一起抹掉，攻击者用一万个随机用户名各失败一次就能解锁所有人。"""
 
     MAX_FAILURES = 5
     LOCK_SECONDS = 300
-    MAX_KEYS = 10_000  # 防注入垃圾 key 撑爆内存（演示语义内足够大）
+    MAX_KEYS = 10_000
 
     def __init__(self):
-        self._failures: dict[str, list[float]] = {}
+        self._failures: "OrderedDict[str, list[float]]" = OrderedDict()
 
     def _key(self, username: str, ip: str) -> str:
         return f"{username}@{ip}"
 
-    def _prune(self) -> None:
-        if len(self._failures) > self.MAX_KEYS:
-            # 简单防涨：超限即整体重置——限速是短窗保护，误清的代价远小于 OOM
-            self._failures.clear()
-
     def locked(self, username: str, ip: str) -> int | None:
-        """返回剩余锁定秒数（None = 未锁定）。"""
+        """返回剩余锁定秒数（None = 未锁定）。只读为主：过期条目顺手清掉。"""
         key = self._key(username, ip)
+        marks = self._failures.get(key)
+        if not marks:
+            return None
         now = time.time()
-        marks = [t for t in self._failures.get(key, []) if now - t < self.LOCK_SECONDS]
-        self._failures[key] = marks
-        if len(marks) >= self.MAX_FAILURES:
-            return int(self.LOCK_SECONDS - (now - marks[0])) + 1
+        fresh = [t for t in marks if now - t < self.LOCK_SECONDS]
+        if not fresh:
+            self._failures.pop(key, None)
+            return None
+        self._failures[key] = fresh
+        self._failures.move_to_end(key)
+        if len(fresh) >= self.MAX_FAILURES:
+            return int(self.LOCK_SECONDS - (now - fresh[0])) + 1
         return None
 
     def record_failure(self, username: str, ip: str) -> None:
-        self._prune()
-        self._failures.setdefault(self._key(username, ip), []).append(time.time())
+        key = self._key(username, ip)
+        now = time.time()
+        marks = [t for t in self._failures.get(key, []) if now - t < self.LOCK_SECONDS]
+        marks.append(now)
+        self._failures[key] = marks
+        self._failures.move_to_end(key)
+        while len(self._failures) > self.MAX_KEYS:
+            self._failures.popitem(last=False)
 
     def clear(self, username: str, ip: str) -> None:
         self._failures.pop(self._key(username, ip), None)
@@ -220,15 +232,23 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
         except SessionNotFound:
             return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
 
-        gen_result = await _generation.handle(payload.message, token, session,
-                                              emit=lambda event: _hub.emit(session.id, event),
-                                              me=me)
-        if gen_result is not None:
-            return envelope({"reply": gen_result.get("reply"), "table": None,
+        # 同一会话互斥：非流式通道没有 SSE 的运行守卫，两个并发请求会同时
+        # 写同一个 SQLite 会话、互相覆盖槽位（流式通道靠 hub.begin 挡住）
+        if not _hub.begin(session.id):
+            return JSONResponse(status_code=409, content=envelope(
+                None, "该会话有任务进行中，请等待完成", 409))
+        try:
+            gen_result = await _generation.handle(payload.message, token, session,
+                                                  emit=lambda event: _hub.emit(session.id, event),
+                                                  me=me)
+            if gen_result is not None:
+                return envelope({"reply": gen_result.get("reply"), "table": None,
+                                 "session_id": session.id})
+            final = await _agent.run(payload.message, token, session)
+            return envelope({"reply": final.get("reply"), "table": final.get("table"),
                              "session_id": session.id})
-        final = await _agent.run(payload.message, token, session)
-        return envelope({"reply": final.get("reply"), "table": final.get("table"),
-                         "session_id": session.id})
+        finally:
+            _hub.finish(session.id)
 
     # ---- 规则版回退（无 LLM，仅开发自测）：消息不落会话，见 chat.py ----
     reply = await _chat.handle(payload.message, token, payload.session_id)

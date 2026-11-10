@@ -5,6 +5,7 @@ import cn.dev33.satoken.jwt.StpLogicJwtForStateless;
 import cn.dev33.satoken.stp.StpLogic;
 import com.generated.platform.admin.mapper.RequestDedupMapper;
 import com.generated.platform.common.DedupFilter;
+import com.generated.platform.security.SessionService;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,9 +30,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class SaTokenConfig implements WebMvcConfigurer {
 
     private final PermVersionGuard permVersionGuard;
+    private final SessionService sessionService;
 
-    public SaTokenConfig(PermVersionGuard permVersionGuard) {
+    public SaTokenConfig(PermVersionGuard permVersionGuard, SessionService sessionService) {
         this.permVersionGuard = permVersionGuard;
+        this.sessionService = sessionService;
     }
 
     /**
@@ -45,7 +48,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new AuthGuardInterceptor(permVersionGuard))
+        registry.addInterceptor(new AuthGuardInterceptor(permVersionGuard, sessionService))
                 .addPathPatterns("/api/**")
                 // 登录接口本身不能要求登录；actuator 不在 /api 下，天然放行
                 .excludePathPatterns("/api/auth/login");

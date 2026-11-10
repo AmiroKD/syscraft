@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import operator
+import re
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -35,6 +36,10 @@ from syscraft.tools.spring_client import SpringClient, SpringError
 
 # 工具循环上限。防模型反复查询兜圈：4 轮足够完成「查→统计→补查」的合理链路
 MAX_TOOL_ROUNDS = 4
+
+# 兑底卡片同款解析：从工具报错里提取「用户想要但不存在的实体名」（需求池上报用）。
+# name 用 !r 拼，含引号时会切成双引号，两种都要接
+_WANTED_ENTITY_RE = re.compile(r"实体 ['\"](.+?)['\"] 不存在")
 
 # 指代词表（设计 3.2 的确定性解析）。命中且句子里没有显式实体名时才启用槽位
 PRONOUN_ENTITY = ("它", "那张表", "刚才那张表", "这个表", "该表")
@@ -272,6 +277,10 @@ class BusinessAgent:
                                       for e in self._catalog.all()],
                         "hint": "系统里还没有这个能力。可以联系管理员描述需求生成新系统。",
                     })
+                    # 需求池上报（底座扩展 v0.1）：兑底卡片解释能力边界的同时把「用户要了
+                    # 但系统没有」落到 adm_feature_request，管理员可采纳后触发生成。
+                    # 上报是副线：任何失败都吞掉，绝不影响主对话链路
+                    await self._report_feature_request(session, str(error), state)
             except SpringError as error:
                 entity = self._catalog.by_name(str(args.get("entity", "")))
                 result = {"ok": False, "error": _spring_message(error, entity)}
@@ -279,7 +288,7 @@ class BusinessAgent:
             if name == "query_records" and result.get("ok"):
                 entity = self._catalog.by_name(result["entity"])
                 rows = result.pop("__rows__", [])
-                table = {"columns": [{"key": f.column, "title": f.semantic, "type": f.type}
+                table = {"columns": [{"key": f.column, "title": _label(f), "type": f.type}
                                      for f in entity.fields],
                          "rows": rows, "total": result.get("total", 0)}
                 session.append("assistant", "table", {"entity": entity.entity, "total": table["total"],
@@ -305,6 +314,21 @@ class BusinessAgent:
                 "events": events, "stop": stop, "table": table,
                 "tool_calls": [], "reply": reply}
 
+    async def _report_feature_request(self, session, error_text: str, state: AgentState) -> None:
+        """把「用户要了但系统没有」上报需求池（底座扩展 v0.1）。
+
+        走平台 API 而非直连 adm——权限 6 节的物理不可达约束不因新功能破例。
+        副线纪律：整体 try/except，任何失败（网络/权限/频控）都静默放弃，
+        对话主链路对此无感知；repeat 触发由平台侧频控兜底。
+        """
+        try:
+            match = _WANTED_ENTITY_RE.search(error_text)
+            raw_text = _last_user_text(session) or error_text
+            await self._client.report_feature_request(raw_text, match.group(1) if match else None,
+                                                      state["token"])
+        except Exception:  # noqa: BLE001 - 上报失败不影响对话
+            pass
+
     @staticmethod
     def _expired(pending: dict) -> bool:
         from datetime import datetime
@@ -312,6 +336,28 @@ class BusinessAgent:
             return datetime.fromisoformat(pending["expiresAt"]) < datetime.now()
         except (KeyError, ValueError):
             return True
+
+
+def _label(field) -> str:
+    """表格列标题。语义描述常常是一整句（「活动结束时间，可为空表示未设定」），
+    直接当表头会把列宽撑爆；取首个分句并限长，完整语义仍留在 LLM prompt 里。"""
+    text = str(getattr(field, "semantic", "") or "").strip()
+    for separator in ("，", ",", "；", ";", "（", "(", "。"):
+        text = text.split(separator)[0]
+    return (text[:12] or field.column).strip()
+
+
+def _last_user_text(session) -> str | None:
+    """最近一条用户消息的文本（需求池的原话字段）。取不到就返回 None，由上报侧用错误文案兜底"""
+    try:
+        for message in reversed(session.messages(limit=20)):
+            if message["role"] == "user" and message["type"] == "text":
+                content = message["content"]
+                text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+                return text[:500]
+    except Exception:  # noqa: BLE001 - 会话读取失败不影响上报主流程
+        pass
+    return None
 
 
 def _spring_message(error: SpringError, entity: EntityInfo | None) -> str:

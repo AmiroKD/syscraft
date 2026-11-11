@@ -8,7 +8,12 @@
 seq 由中枢统一分配，单调递增；日志每轮 begin() 时重建，轮内不截断
 （事件是小 dict，一轮最多几千个、几百 KB 量级，不值得用截断换内存——
 截断会在长流水线上凿出回放缺口，重连拿不到中间事件又无从补救）。
-done 条目不永久驻留：超上限时从最老的 done 驱起。"""
+done 条目不永久驻留：超上限时从最老的 done 驱起。
+
+暂停（《暂停与刷新恢复设计》2 节）也挂在这里：中枢同时握着本轮的 dispatch 任务
+句柄，暂停就是 cancel 它。为什么不做「冻结后原地继续」——LLM 是一次非流式补全，
+服务端没有可续的中间态，恢复等于重发一遍请求，模型未必给同样的答案。所以暂停的
+语义是「停下，把已经产出的留下」，不是「冻结」。"""
 
 from __future__ import annotations
 
@@ -35,7 +40,9 @@ class StreamHub:
         self._runs[session_id] = {"status": "running",
                                   "seq": run["seq"] if run else 0,
                                   "events": deque(),
-                                  "error": None}
+                                  "error": None,
+                                  "pause": False,
+                                  "task": None}
         self._sweep()
         return True
 
@@ -67,10 +74,43 @@ class StreamHub:
         if run is not None:
             run["status"] = "done"
             run["error"] = error
+            run["task"] = None  # 别握着一个已结束的任务句柄
 
     def status(self, session_id: str) -> str | None:
         run = self._runs.get(session_id)
         return run["status"] if run else None
+
+    # ---- 暂停 ----
+
+    def attach_task(self, session_id: str, task) -> None:
+        """把本轮的 dispatch 任务交给中枢保管。暂停要 cancel 它——
+        只有任务句柄能打断正在 await 的 LLM 调用，标志位只能等到下一个边界。"""
+        run = self._runs.get(session_id)
+        if run is not None and run["status"] == "running":
+            run["task"] = task
+
+    def request_pause(self, session_id: str) -> bool:
+        """请求暂停本轮。返回 False 表示没有在跑的运行（或刚结束）。
+
+        cancel 之后由 dispatch 的 CancelledError 分支负责落库与补说明——
+        收殓写在 dispatch 里而不是这里，是因为只有它知道本轮产出了什么。"""
+        run = self._runs.get(session_id)
+        if run is None or run["status"] != "running":
+            return False
+        run["pause"] = True
+        task = run.get("task")
+        if task is not None and not task.done():
+            task.cancel()
+        return True
+
+    def is_paused(self, session_id: str) -> bool:
+        run = self._runs.get(session_id)
+        return bool(run and run["pause"])
+
+    def seq(self, session_id: str) -> int:
+        """会话当前的事件序号（跨轮递增）。刷新后的接管要靠它续上缺口。"""
+        run = self._runs.get(session_id)
+        return int(run["seq"]) if run else 0
 
     def replay(self, session_id: str, after_seq: int = 0) -> list[dict]:
         run = self._runs.get(session_id)

@@ -17,12 +17,13 @@ import time
 from collections import OrderedDict
 
 from fastapi import FastAPI, Header, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from syscraft import config
+from syscraft import config, llm_settings
 from syscraft.agent.generate import GenerationFlow
-from syscraft.agent.graph import BusinessAgent
+from syscraft.agent.graph import MAX_HISTORY_ROWS, BusinessAgent
 from syscraft.conversation.chat import ChatService
 from syscraft.conversation.store import SessionNotFound, SessionStore
 from syscraft.conversation.stream_hub import StreamHub, generation_lock
@@ -41,10 +42,20 @@ def _build_resolver():
 
 
 app = FastAPI(title="SysCraft 平台", version="0.1.0")
+# 前端（Vue 3）构建产物：web/dist。产物随仓库提交，所以只有 Python 环境也能起服务；
+# 改了前端源码要重新 `cd web && npm run build`。
+# check_dir=False：先起服务、后构建也能生效，不用为了一个目录存在与否再重启一次。
+_DIST = config.PROJECT_ROOT / "web" / "dist"
+app.mount("/assets", StaticFiles(directory=str(_DIST / "assets"), check_dir=False),
+          name="assets")
+
+# 恢复上次选择的模型（四个 LLM 入口都在调用时读 config.LLM_MODEL，这里改全局即可）
+llm_settings.load()
 
 _client = SpringClient()
 _chat = ChatService(_client, _build_resolver())
-_agent = BusinessAgent(_client) if config.LLM_API_KEY else None
+# 始终构造：设置面板允许运行时补填 API Key，启动时没配也不该把 Agent 永久钉死为 None
+_agent = BusinessAgent(_client)
 _sessions = SessionStore()
 _hub = StreamHub()
 _generation = GenerationFlow(_client)
@@ -92,9 +103,16 @@ class LoginRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=500)
-    # 会话 id 先透传占位：上下文裁剪与指代消解属于会话层，等那一层落地再用它
+    # 续传（resume=1）不带消息：那一次请求只接管事件流，不派发新任务。
+    # 是否为空在端点里判——空消息 + 非续传仍然是非法请求。
+    message: str = Field(default="", max_length=500)
     session_id: str | None = Field(default=None, max_length=64)
+
+
+class SessionRef(BaseModel):
+    """只带会话 id 的操作（暂停）。"""
+
+    session_id: str = Field(min_length=1, max_length=64)
 
 
 class RenameRequest(BaseModel):
@@ -103,6 +121,21 @@ class RenameRequest(BaseModel):
 
 class SwitchRequest(BaseModel):
     version: str = Field(min_length=1, max_length=24)
+
+
+class LlmSettingsRequest(BaseModel):
+    base_url: str = Field(alias="baseUrl", min_length=1, max_length=300)
+    api_key: str | None = Field(default=None, alias="apiKey", max_length=500)
+    model: str = Field(min_length=1, max_length=100)
+    model_config = {"populate_by_name": True}
+
+
+# 模型接入是平台级动作（全局生效），与生成/改结构同一条权限线
+LLM_CONFIG_ROLES = {"SUPER_ADMIN", "ADMIN"}
+
+# 暂停后补进历史的说明。措辞要同时说清两件事：这轮是被人停的（不是失败），
+# 以及接下来能做什么（重新发送）——只说「已停止」会让人以为要重开一个会话
+PAUSE_NOTE = "已暂停本次回答。可以继续提问，或补充条件后重新发送。"
 
 
 def envelope(data=None, msg: str = "ok", code: int = 0) -> dict:
@@ -116,8 +149,16 @@ async def healthz() -> dict:
 
 @app.get("/")
 async def index():
-    """最小前端（web/index.html）。设计是 SPA 单页，这里直接托管。"""
-    return FileResponse(config.PROJECT_ROOT / "web" / "index.html")
+    """前端（web/dist）：Vue 3 单页，由平台自己托管——浏览器只认 8090 一个源。"""
+    page = _DIST / "index.html"
+    if not page.exists():
+        return HTMLResponse(
+            "<meta charset='utf-8'><h1>前端尚未构建</h1>"
+            "<p>在 <code>agent-platform/web</code> 下执行 "
+            "<code>npm install &amp;&amp; npm run build</code> 后刷新本页。</p>",
+            status_code=503,
+        )
+    return FileResponse(page, headers={"Cache-Control": "no-store"})
 
 
 class _LoginThrottle:
@@ -188,6 +229,86 @@ async def login(payload: LoginRequest, request: Request):
     return envelope(data)
 
 
+@app.get("/api/auth/me")
+async def current_user(authorization: str | None = Header(default=None)):
+    """当前登录用户（前端进主界面时取身份）。
+
+    平台是浏览器唯一入口（《接口契约》1 节），所以这个端点必须由平台转发，
+    而不是让前端直连产物：前端只认 8090 一个源，CORS 与令牌范围都不越界。
+    """
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        user = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if user is None:
+        return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+    return envelope(user)
+
+
+@app.get("/api/settings/llm")
+async def get_llm_setting(authorization: str | None = Header(default=None)):
+    """公开状态：平台是否已配置 + 常用模型建议。不回传服务端 URL/Key/模型。"""
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if me is None:
+        return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+    return envelope(llm_settings.public_snapshot())
+
+
+@app.put("/api/settings/llm")
+async def update_llm_setting(payload: LlmSettingsRequest,
+                             authorization: str | None = Header(default=None)):
+    """保存 Base URL / API Key / 模型名，立即对全部 LLM 入口生效。"""
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if me is None:
+        return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+    if me.get("roleCode") not in LLM_CONFIG_ROLES:
+        return JSONResponse(status_code=403, content=envelope(None, "仅管理员可修改模型配置", 403))
+    try:
+        data = llm_settings.set_config(payload.base_url, payload.api_key, payload.model)
+    except llm_settings.LlmConfigError as error:
+        return JSONResponse(status_code=400, content=envelope(None, str(error), 400))
+    except llm_settings.LlmSettingsError as error:
+        return JSONResponse(status_code=500, content=envelope(None, str(error), 500))
+    return envelope(data)
+
+
+@app.post("/api/settings/llm/test")
+async def test_llm_setting(payload: LlmSettingsRequest,
+                           authorization: str | None = Header(default=None)):
+    """用最小补全测试 URL / Key / 模型；失败也返回 200 + ok=false，便于前端展示原因。"""
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if me is None:
+        return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+    if me.get("roleCode") not in LLM_CONFIG_ROLES:
+        return JSONResponse(status_code=403, content=envelope(None, "仅管理员可测试模型配置", 403))
+    try:
+        data = await llm_settings.test_connection(payload.base_url, payload.api_key, payload.model)
+    except llm_settings.LlmConfigError as error:
+        return JSONResponse(status_code=400, content=envelope(None, str(error), 400))
+    return envelope(data)
+
+
 @app.post("/api/generate/cancel")
 async def generate_cancel(authorization: str | None = Header(default=None)):
     """取消进行中的生成（《运行时管理设计》步骤边界语义）。
@@ -216,11 +337,13 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
     token = _bearer(authorization)
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    if not payload.message.strip():
+        return JSONResponse(status_code=400, content=envelope(None, "消息不能为空", 400))
     if generation_lock.locked():
         return JSONResponse(status_code=503, content=envelope(None, "系统正在生成中，请稍后再试", 503))
 
     # ---- Agent 引擎（有 LLM）：生成流优先，业务图接盘 ----
-    if _agent is not None:
+    if _agent is not None and config.LLM_API_KEY:
         try:
             me = await _identity(token)
             if me is None:
@@ -265,20 +388,61 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
     return envelope({"reply": reply.reply, "table": table, "session_id": payload.session_id})
 
 
+@app.post("/api/chat/pause")
+async def chat_pause(payload: SessionRef, authorization: str | None = Header(default=None)):
+    """暂停本轮回答（《暂停与刷新恢复设计》2 节）。
+
+    语义是「停下并把已经产出的留下」，不是「冻结后原地继续」：LLM 是一次非流式
+    补全，服务端没有可续的中间态，恢复等于重发一遍请求。
+
+    受理即返回：真正的收殓在 dispatch 的 CancelledError 分支里（落表格、补一句
+    暂停说明），前端从 paused 事件看到终态。生成流水线不走这里——它有步骤边界
+    上的「取消生成」，取消任务动不了 to_thread 里的编译线程。"""
+    token = _bearer(authorization)
+    if token is None:
+        return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        me = await _identity(token)
+        if me is None:
+            return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+        session = _sessions.open(payload.session_id, me["id"])
+    except SpringError as error:
+        return _error(error)
+    except SessionNotFound:
+        return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
+    if session.get_slot("gen_state") == "running":
+        return JSONResponse(status_code=409, content=envelope(
+            None, "系统正在生成，请用进度面板上的「取消生成」", 409))
+    if not _hub.request_pause(session.id):
+        return JSONResponse(status_code=409, content=envelope(None, "当前没有进行中的回答", 409))
+    return envelope({"pausing": True})
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(payload: ChatRequest, authorization: str | None = Header(default=None),
-                      after_seq: int = Query(default=0, ge=0)):
+                      after_seq: int = Query(default=0, ge=0),
+                      resume: bool = Query(default=False)):
     """SSE 流式对话（《技术栈》3.2 + 《会话与上下文策略》6.2）。
 
-    - after_seq=0：新消息。会话有任务在身时拒绝 409（前端输入框禁用的后端约束）；
+    - after_seq=0 且不带 resume：新消息。会话有任务在身时拒绝 409（前端输入框
+      禁用的后端约束）；
     - after_seq>0：断线重连。不重发请求——只补发缺失事件，继续跟到本轮结束；
-      运行已结束则回放全部事件后立即 done（设计 6.2「直接返回最终状态」）。
+      运行已结束则回放全部事件后立即 done（设计 6.2「直接返回最终状态」）；
+    - resume=1：刷新后的接管。seq 由客户端从 /api/sessions/{id}/messages 的
+      run.seq 取（可以是 0），同样只跟随、不派发——刷新不该等于重发一条消息。
     """
     token = _bearer(authorization)
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
-    if _agent is None:
-        return JSONResponse(status_code=503, content=envelope(None, "未配置模型，流式通道不可用", 503))
+    if _agent is None or not config.LLM_API_KEY:
+        return JSONResponse(status_code=503, content=envelope(
+            None, "未配置模型，请在「设置 → 模型服务」填写 API Key", 503))
+
+    following = bool(resume) or after_seq > 0
+    if following and not payload.session_id:
+        return JSONResponse(status_code=400, content=envelope(None, "续传必须带 session_id", 400))
+    if not following and not payload.message.strip():
+        return JSONResponse(status_code=400, content=envelope(None, "消息不能为空", 400))
 
     # 身份与会话在进入流之前解析完：错误以普通 JSON 返回，前端不用解析 SSE 里的错误。
     # 注意身份用 _identity：生成期间产物停机，重连不能被 me() 的 502 拦在门外（实测踩过）
@@ -294,20 +458,26 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
         return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
 
     sid = session.id
-    reconnecting = after_seq > 0
-
     # 会话忙碌的判定 = hub 运行中 或 生成流水线尾部仍在跑（生成流 dispatch 提前返回，
     # hub 状态已被收殓，只剩 gen_state 槽位能说明还有事件会来）
-    if _hub.is_active(sid) or session.get_slot("gen_state") == "running":
-        if not reconnecting:
-            return JSONResponse(status_code=409, content=envelope(None, "该会话有任务进行中，请等待完成", 409))
-    elif reconnecting:
-        # 运行已结束的重连：回放既有事件后立刻 done（follow 循环自然走完）
-        pass
-    elif generation_lock.locked():
-        return JSONResponse(status_code=503, content=envelope(None, "另一个会话正在生成系统，请稍后再试", 503))
-    elif not _hub.begin(sid):
+    decision = _stream_decision(
+        active=_hub.is_active(sid) or session.get_slot("gen_state") == "running",
+        following=following,
+        generation_locked=generation_lock.locked(),
+    )
+    if decision == "conflict":
+        return JSONResponse(status_code=409, content=envelope(None, "该会话有任务进行中，请等待完成", 409))
+    if decision == "generation_locked":
+        return JSONResponse(status_code=503, content=envelope(
+            None, "另一个会话正在生成系统，请稍后再试", 503))
+    started = decision == "start"
+    if started and not _hub.begin(sid):
         return JSONResponse(status_code=409, content=envelope(None, "该会话有任务进行中", 409))
+
+    # 首个事件回传会话 id：新会话的首轮没有 id，前端拿到它才能
+    # 「断线续传」而不是重发（重发会再建一个会话——历史会话裂开的另一半原因）
+    if started:
+        _hub.emit(sid, {"type": "session", "sessionId": sid})
 
     def emit(event: dict) -> None:
         _hub.emit(sid, event)
@@ -318,10 +488,19 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
         try:
             gen_result = await _generation.handle(payload.message, token, session, emit, me=me)
             if gen_result is not None:
-                if gen_result.get("reply"):
+                if gen_result.get("event"):
+                    # 计划/追问是结构化卡片（可点确认、可填表单），按类型回传；
+                    # 其余回复仍走纯文本
+                    emit(gen_result["event"])
+                elif gen_result.get("reply"):
                     emit({"type": "text", "text": gen_result["reply"]})
                 return
             await _agent.run(payload.message, token, session, on_event=emit)
+        except asyncio.CancelledError:
+            # 暂停：取消点通常落在 await 中的 LLM / 工具请求里。不重新抛出——
+            # 抛出会让 task 变成 cancelled，_follow_events 取 exception() 时二次炸掉，
+            # 连接就收不到 paused 和 done 两个终态事件了（见 _settle_pause）
+            _settle_pause(sid, session, _hub)
         except Exception as error:  # noqa: BLE001 任何异常都要变成流里的事件而不是悬空连接
             emit({"type": "error", "message": f"处理失败：{error}"})
         finally:
@@ -330,7 +509,9 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
             # 重连连接只读不收殓，拆不掉别人的运行守卫、不会注入提前 done
             _hub.finish(sid)
 
-    task = None if reconnecting else asyncio.create_task(dispatch())
+    task = asyncio.create_task(dispatch()) if started else None
+    if task is not None:
+        _hub.attach_task(sid, task)
 
     async def sse():
         async for event in _follow_events(sid, session, _hub, task, after_seq):
@@ -338,6 +519,67 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
 
     return StreamingResponse(sse(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _stream_decision(active: bool, following: bool, generation_locked: bool) -> str:
+    """这条流式请求该做什么：start（派发新消息）/ follow（只跟随）/ 拒绝。
+
+    纯函数：把「会话是否在跑 × 是不是续传 × 有没有生成占着全局锁」的四种组合
+    摊开写，单测能直接覆盖，不用起 HTTP、不用连库（《暂停与刷新恢复设计》4 节）。
+    """
+    if active:
+        return "follow" if following else "conflict"
+    if following:
+        # 运行已结束的续传：回放既有事件后立刻 done（follow 循环自然走完）
+        return "follow"
+    if generation_locked:
+        return "generation_locked"
+    return "start"
+
+
+def _settle_pause(sid: str, session, hub: StreamHub) -> None:
+    """暂停的收殓：把「用户已经看见的东西」落库，再补一句暂停说明。
+
+    表格是在本轮结束时才统一落库的，不补这一步，暂停后刷新页面会发现刚才那张表
+    凭空消失；补说明则让人知道这轮不是失败，是被人为停下的（notice 类型不进
+    LLM 历史，见 context._history_text）。
+    """
+    try:
+        events = hub.replay(sid)
+        if any(e.get("type") == "text" for e in events):
+            return  # 回答已经出来了，暂停来晚了，不制造多余的说明
+        table = next((e.get("table") for e in reversed(events)
+                      if e.get("type") == "table" and e.get("table")), None)
+        if table:
+            _persist_live_table(session, table)
+        note = PAUSE_NOTE
+        session.append("assistant", "notice", note)
+        hub.emit(sid, {"type": "paused", "text": note})
+    except Exception:  # noqa: BLE001 收殓失败不能反过来炸掉这条连接，前端至少能收到 done
+        pass
+
+
+def _persist_live_table(session, table: dict) -> None:
+    """把暂停瞬间的表格写进历史（与 graph._persist_table 同一份结构）。
+
+    去重：上一轮如果已经把同一实体的表格落库了，这里不再写第二张——多轮查询
+    只该在历史里留下最终那张表。"""
+    try:
+        last = session.messages(limit=1)
+    except Exception:  # noqa: BLE001 读不到历史就不做去重，写总比丢强
+        last = []
+    if last and last[-1].get("type") == "table" \
+            and (last[-1].get("content") or {}).get("entity") == table.get("entity"):
+        return
+    rows = (table.get("rows") or [])[:MAX_HISTORY_ROWS]
+    content = {"entity": table.get("entity"), "display": table.get("display"),
+               "columns": table.get("columns") or [], "rows": rows,
+               "total": table.get("total", len(rows)), "displayed": len(rows)}
+    if table.get("kind"):
+        content["kind"] = table["kind"]
+    if table.get("chart"):
+        content["chart"] = table["chart"]
+    session.append("assistant", "table", content, tool_call=table.get("toolCall"))
 
 
 async def _follow_events(sid: str, session, hub: StreamHub, task, after_seq: int):
@@ -378,9 +620,13 @@ async def list_sessions(authorization: str | None = Header(default=None)):
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
     try:
-        me = await _client.me(token)
+        # 用 _identity 而不是直连 me()：生成期间产物会停机，侧栏不能跟着 502——
+        # 会话是平台自己的库，产物不在线也应能翻历史
+        me = await _identity(token)
     except SpringError as error:
         return _error(error)
+    if me is None:
+        return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
     return envelope(_sessions.list_for(me["id"]))
 
 
@@ -390,14 +636,22 @@ async def session_messages(session_id: str, authorization: str | None = Header(d
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
     try:
-        me = await _client.me(token)
+        me = await _identity(token)
+        if me is None:
+            return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
         session = _sessions.open(session_id, me["id"])
     except SpringError as error:
         return _error(error)
     except SessionNotFound:
         return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
+    # 运行状态回传给前端：刷新后据此决定「继续接管这条流」还是「只看历史」。
+    # seq 是接管点（中枢的跨轮单调序号），mode 决定刷新后是显示打字指示还是进度面板
+    generating = session.get_slot("gen_state") == "running"
+    run = {"active": _hub.is_active(session_id) or generating,
+           "seq": _hub.seq(session_id),
+           "mode": "generation" if generating else "chat"}
     return envelope({"sessionId": session_id, "title": session.meta().get("title", ""),
-                     "messages": session.messages()})
+                     "messages": session.messages(), "run": run})
 
 
 @app.patch("/api/sessions/{session_id}")
@@ -407,15 +661,15 @@ async def rename_session(session_id: str, payload: RenameRequest,
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
     try:
-        me = await _client.me(token)
+        me = await _identity(token)
+        if me is None:
+            return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
         session = _sessions.open(session_id, me["id"])
     except SpringError as error:
         return _error(error)
     except SessionNotFound:
         return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
-    with session._conn() as conn:
-        conn.execute("UPDATE meta SET value=? WHERE key='title'", (payload.title[:20],))
-        conn.commit()
+    session.set_title(payload.title)
     return envelope({"sessionId": session_id, "title": payload.title[:20]})
 
 
@@ -425,7 +679,9 @@ async def delete_session(session_id: str, authorization: str | None = Header(def
     if token is None:
         return JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
     try:
-        me = await _client.me(token)
+        me = await _identity(token)
+        if me is None:
+            return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
         _sessions.delete(session_id, me["id"])
     except SpringError as error:
         return _error(error)

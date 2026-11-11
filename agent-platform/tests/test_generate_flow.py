@@ -80,7 +80,7 @@ def env(monkeypatch):
 
 @pytest.fixture()
 def store(env):
-    return SessionStore(root=env / "sessions")
+    return SessionStore()
 
 
 # ---------------------------------------------------------------- 意图识别
@@ -113,10 +113,17 @@ async def test_clarification_then_answer_then_plan(store, env):
     first = await flow.handle("做一个图书管理系统", "tk", session, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
     assert "借阅要登记谁吗" in first["reply"]
     assert session.get_slot("gen_state") == "awaiting_answers"
+    # 澄清以 ask 事件回传：前端渲染成可填写的追问卡，而不是一段纯文本
+    assert first["event"]["type"] == "ask" and first["event"]["kind"] == "clarify"
+    assert first["event"]["items"][0]["question"] == "借阅要登记谁吗"
+    assert first["event"]["options"][0]["value"] == "按默认"
+    assert ("assistant", "ask") in [(m["role"], m["type"]) for m in session.messages()]
 
     second = await flow.handle("按默认的来", "tk", session, lambda e: None, me={"roleCode": "SUPER_ADMIN"})
     assert "确认生成" in second["reply"]
     assert session.get_slot("gen_state") == "awaiting_plan"
+    # 计划同样带类型化事件：流式过程中就能渲染成计划卡（带确认按钮）
+    assert second["event"]["type"] == "plan" and second["event"]["assumptions"]
     # 回答轮的入参：需求还是原话，回答是用户消息
     requirement, answers = FAKE_CALLS[-1]
     assert requirement == "做一个图书管理系统" and answers == ["按默认的来"]

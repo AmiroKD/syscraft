@@ -200,7 +200,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.mark.anyio
 async def test_amend_plan_then_confirm_runs_migration(env, tmp_path):
-    store = SessionStore(root=tmp_path / "sessions")
+    store = SessionStore()
     session = store.create(user_id=1)
     flow = GenerationFlow(client=None)
 
@@ -225,7 +225,7 @@ async def test_amend_plan_then_confirm_runs_migration(env, tmp_path):
 
 @pytest.mark.anyio
 async def test_amend_requires_admin(env, tmp_path):
-    store = SessionStore(root=tmp_path / "sessions")
+    store = SessionStore()
     session = store.create(user_id=2)
     flow = GenerationFlow(client=None)
     result = await flow.handle("给活动加一个备注字段", "tk", session,
@@ -236,7 +236,7 @@ async def test_amend_requires_admin(env, tmp_path):
 
 @pytest.mark.anyio
 async def test_amend_cancel_clears_mode(env, tmp_path):
-    store = SessionStore(root=tmp_path / "sessions")
+    store = SessionStore()
     session = store.create(user_id=1)
     flow = GenerationFlow(client=None)
     await flow.handle("给活动加一个备注字段", "tk", session,

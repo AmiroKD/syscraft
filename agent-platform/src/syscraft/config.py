@@ -21,6 +21,15 @@ PLATFORM_PORT = int(os.getenv("PLATFORM_PORT", "8090"))
 
 MODELS_DIR = PROJECT_ROOT / "models"
 
+# ---- 会话存储（chat 库）----
+# Python 侧唯一可写的库：与 adm（权限）和 biz（业务）分开，账号也只授权 chat.*，
+# 这样「平台不写权限库」不靠自觉，而是靠数据库权限兜住。
+CHAT_DB_HOST = os.getenv("CHAT_DB_HOST", "127.0.0.1")
+CHAT_DB_PORT = int(os.getenv("CHAT_DB_PORT", "3306"))
+CHAT_DB_NAME = os.getenv("CHAT_DB_NAME", "chat")
+CHAT_DB_USER = os.getenv("CHAT_DB_USER", "chat")
+CHAT_DB_PASSWORD = os.getenv("CHAT_DB_PASSWORD", "")
+
 # ---- LLM 接入（来源 db.env，与数据库凭证同一文件、同一权限）----
 # 没配 LLM_API_KEY 时，对话解析退回规则版 IntentResolver
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")

@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import operator
 import re
+import time
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -37,6 +38,10 @@ from syscraft.tools.spring_client import SpringClient, SpringError
 # 工具循环上限。防模型反复查询兜圈：4 轮足够完成「查→统计→补查」的合理链路
 MAX_TOOL_ROUNDS = 4
 
+# 表格落库的行数上限。历史重开要能看见表格，但没必要把 200 行原样存进
+# chat_message——前 50 行足够还原观感，合计条数仍然准确。
+MAX_HISTORY_ROWS = 50
+
 # 兑底卡片同款解析：从工具报错里提取「用户想要但不存在的实体名」（需求池上报用）。
 # name 用 !r 拼，含引号时会切成双引号，两种都要接
 _WANTED_ENTITY_RE = re.compile(r"实体 ['\"](.+?)['\"] 不存在")
@@ -46,6 +51,10 @@ PRONOUN_ENTITY = ("它", "那张表", "刚才那张表", "这个表", "该表")
 PRONOUN_RECORD = ("那条", "这条", "刚才那条", "刚才那条记录")
 
 CONFIRM_WORDS = {"确认", "确定", "是的", "是", "对", "好的", "ok", "OK", "Ok", "执行", "删除吧", "删吧"}
+
+# 取消待确认操作。只在真有待确认状态时短路——否则「取消的报名记录」这种
+# 正常问句会被误吞。
+CANCEL_WORDS = {"取消", "不用了", "算了", "放弃", "别删了", "不要了"}
 
 
 class AgentState(TypedDict, total=False):
@@ -60,6 +69,8 @@ class AgentState(TypedDict, total=False):
     tool_rounds: int
     reply: str | None
     table: dict | None
+    table_saved: bool         # 本轮最终表格是否已落库（多轮查询只留最后一张）
+    last_tool_error: str | None
     stop: bool
 
 
@@ -134,6 +145,7 @@ class BusinessAgent:
             "user_message": message, "token": token, "session": session,
             "events": [], "llm_messages": [], "tool_rounds": 0,
             "reply": None, "table": None, "stop": False,
+            "table_saved": False, "last_tool_error": None,
         }
         # stream_mode="updates"：每个节点跑完推一次增量；
         # 最终状态由增量自行合并（节点返回的都是部分键）
@@ -151,6 +163,17 @@ class BusinessAgent:
                 for event in node_update.get("events", []):
                     if on_event:
                         on_event(event)
+
+        # 工具轮次耗尽 / 模型空回复的兜底：已经查到的表格不能「有数据没结论」，
+        # 用户看到的必须是「共几条 + 结果在下方」而不是一片空白（实测：模型连续
+        # 重试到第 4 轮时图直接走到 respond，final.reply 是 None）。
+        if not (final.get("reply") or "").strip():
+            final["table_saved"] = self._persist_table(final)
+            reply = self._fallback_reply(final)
+            final["reply"] = reply
+            final["session"].append("assistant", "text", reply)
+            if on_event:
+                on_event({"type": "text", "text": reply})
         return final
 
     # ---------------------------------------------------------------- 节点
@@ -160,12 +183,21 @@ class BusinessAgent:
         session = state["session"]
         events: list[dict] = []
 
-        # ① 确认词短路：不进 LLM——它没有实体与条件，只是「同意上一条预告」。
+        # ① 确认/取消词短路：不进 LLM——它没有实体与条件，只是「同意/放弃上一条预告」。
         #    令牌核销只有这一条路，模型不在环里（tools.py 的结构性约束）。
         #    只有真有待确认操作才短路：用户正常聊天说「好的」不该被硬回
         #    「没有待确认的操作」（实测体验：确认词误触会打断正常对话）
-        pending = session.get_slot("pending_confirm") if message.lower() in CONFIRM_WORDS else None
-        if message.lower() in CONFIRM_WORDS and pending is not None:
+        short = message.lower()
+        pending = (session.get_slot("pending_confirm")
+                   if short in CONFIRM_WORDS or short in CANCEL_WORDS else None)
+        if short in CANCEL_WORDS and pending is not None:
+            session.append("user", "text", message)
+            session.set_slot("pending_confirm", None)
+            reply = "已取消本次删除，未执行任何操作。"
+            session.append("assistant", "text", reply)
+            events.append({"type": "text", "text": reply})
+            return {"user_message": message, "reply": reply, "stop": True, "events": events}
+        if short in CONFIRM_WORDS and pending is not None:
             session.append("user", "text", message)
             session.set_slot("pending_confirm", None)
             if self._expired(pending):
@@ -181,7 +213,7 @@ class BusinessAgent:
             session.append("assistant", "text", reply)
             events.append({"type": "text", "text": reply})
             return {"user_message": message, "reply": reply, "stop": True, "events": events}
-        if message.lower() in CONFIRM_WORDS and pending is None:
+        if short in CONFIRM_WORDS and pending is None:
             session.set_slot("pending_confirm", None)  # 确认词但无预告：清掉可能的空槽位，正常进 LLM
 
         # ② 指代消解（设计 3.2，确定性规则优先于模型发挥）
@@ -190,11 +222,18 @@ class BusinessAgent:
         if explicit is None and any(p in message for p in PRONOUN_ENTITY):
             last = session.get_slot("lastEntity") if session else None
             if not last:
+                display_names = [e.display_name for e in self._catalog.all()]
                 reply = ("你指的是哪张表？目前系统里有："
-                         + "、".join(e.display_name for e in self._catalog.all()) + "。")
+                         + "、".join(display_names) + "。")
+                # 追问也发结构化事件：前端渲染成可点选的追问卡，
+                # 点一下等于替用户把那句话发出来，不用照着文案手打
+                content = _ask_content(
+                    "entity", reply,
+                    options=[{"label": name, "value": f"查一下{name}"}
+                             for name in display_names])
                 session.append("user", "text", message)
-                session.append("assistant", "text", reply)
-                events.append({"type": "text", "text": reply})
+                session.append("assistant", "ask", content)
+                events.append({"type": "ask", **content})
                 return {"user_message": message, "reply": reply, "stop": True, "events": events}
             for pronoun in PRONOUN_ENTITY:
                 rewritten = rewritten.replace(pronoun, last["display"])
@@ -207,19 +246,26 @@ class BusinessAgent:
             elif len(record_ids) > 1:
                 reply = (f"最近一次查询有 {len(record_ids)} 条记录（id: {record_ids}），"
                          "请说明要操作哪一条。")
+                content = _ask_content(
+                    "record", reply,
+                    options=[{"label": f"id={rid}", "value": f"我要操作 id={rid} 的这条记录"}
+                             for rid in record_ids[:8]])
                 session.append("user", "text", message)
-                session.append("assistant", "text", reply)
-                events.append({"type": "text", "text": reply})
+                session.append("assistant", "ask", content)
+                events.append({"type": "ask", **content})
                 return {"user_message": message, "reply": reply, "stop": True, "events": events}
             else:
                 reply = "我还不知道你指的是哪条记录，先查一下再说？"
+                content = _ask_content("record", reply)
                 session.append("user", "text", message)
-                session.append("assistant", "text", reply)
-                events.append({"type": "text", "text": reply})
+                session.append("assistant", "ask", content)
+                events.append({"type": "ask", **content})
                 return {"user_message": message, "reply": reply, "stop": True, "events": events}
 
-        # ③ 组装 LLM 消息：先取历史（不含本轮），再落盘本轮用户消息
-        history = llm_history(session.messages()) if session else []
+        # ③ 组装 LLM 消息：先取历史（不含本轮），再落盘本轮用户消息。
+        #    只读最近 60 条：表格消息现在带行数据，读全量没有必要——12 轮原文
+        #    之外都会被压成摘要，再往前的记录对模型没有增量信息。
+        history = llm_history(session.messages(limit=60)) if session else []
         session.append("user", "text", message)
         slots = {"lastEntity": session.get_slot("lastEntity"),
                  "lastResultIds": session.get_slot("lastResultIds")}
@@ -234,8 +280,9 @@ class BusinessAgent:
             result = await chat_with_tools(state["llm_messages"], TOOLS_SPEC)
         except LLMError as error:
             reply = f"模型服务暂时不可用：{error}"
+            saved = self._persist_table(state)
             state["session"].append("assistant", "text", reply)
-            return {"reply": reply, "stop": True,
+            return {"reply": reply, "stop": True, "table_saved": saved,
                     "events": [{"type": "error", "message": reply}]}
         if result["tool_calls"]:
             # OpenAI 协议要求：带 tool_calls 的 assistant 消息必须在下一轮请求里原样带上
@@ -247,10 +294,17 @@ class BusinessAgent:
                                for c in result["tool_calls"]]})
             return {"llm_messages": state["llm_messages"],
                     "tool_calls": result["tool_calls"], "stop": False}
-        reply = (result["content"] or "（模型没有返回内容）").strip()
+        reply = (result["content"] or "").strip()
+        # 表格先落库再落文本：历史重开时的顺序必须是「用户问 → 表格 → 结论」。
+        # 多轮查询只保留最终表格，中间试错的表不再堆进历史。
+        saved = self._persist_table(state)
+        if not reply:
+            # 空回复交给 run() 的兜底：有表格就报条数，没有就请用户重说
+            return {"reply": None, "tool_calls": [], "stop": True,
+                    "table_saved": saved, "events": []}
         state["session"].append("assistant", "text", reply)
         return {"reply": reply, "tool_calls": [], "stop": True,
-                "events": [{"type": "text", "text": reply}]}
+                "table_saved": saved, "events": [{"type": "text", "text": reply}]}
 
     async def _tools_node(self, state: AgentState) -> dict:
         session = state["session"]
@@ -260,11 +314,18 @@ class BusinessAgent:
         stop = False
         table = state.get("table")
         reply = state.get("reply")
+        saved = state.get("table_saved", False)
+        last_error = state.get("last_tool_error")
 
         for call in state.get("tool_calls", []):
-            name, args = call["name"], call["arguments"]
-            events.append({"type": "thought", "text": f"调用 {name}"})
+            name = call.get("name", "")
+            args = call.get("arguments") or {}
+            started = time.perf_counter()
             try:
+                if call.get("arguments_error"):
+                    # 参数 JSON 坏了也要以「工具结果」回灌，模型下一轮能自己改对；
+                    # 直接抛异常会让整轮对话消失（且用户只看到一句「处理失败」）
+                    raise ToolInputError(call["arguments_error"])
                 result = await toolbox.call(name, args, session)
             except ToolInputError as error:
                 result = {"ok": False, "error": str(error)}
@@ -282,37 +343,159 @@ class BusinessAgent:
                     # 上报是副线：任何失败都吞掉，绝不影响主对话链路
                     await self._report_feature_request(session, str(error), state)
             except SpringError as error:
-                entity = self._catalog.by_name(str(args.get("entity", "")))
+                entity = self._catalog.resolve(str(args.get("entity", "")))
                 result = {"ok": False, "error": _spring_message(error, entity)}
+            except Exception as error:  # noqa: BLE001 单个工具出错不能击穿整轮对话
+                result = {"ok": False,
+                          "error": f"工具执行异常：{type(error).__name__}: {error}"}
+
+            # 本调用产出的表格事件先算好、后发：界面上的顺序必须是
+            # 「调了什么 → 拿到什么表 → 得到什么结论」，而且要等结果定稿
+            # （比如实体不在线版本里，要改判成失败）再发轨迹。
+            pending_events: list[dict] = []
 
             if name == "query_records" and result.get("ok"):
-                entity = self._catalog.by_name(result["entity"])
-                rows = result.pop("__rows__", [])
-                table = {"columns": [{"key": f.column, "title": _label(f), "type": f.type}
-                                     for f in entity.fields],
-                         "rows": rows, "total": result.get("total", 0)}
-                session.append("assistant", "table", {"entity": entity.entity, "total": table["total"],
-                                                      "displayed": len(rows)},
-                               tool_call={"name": name, "args": args})
-                events.append({"type": "table", "table": table})
+                entity = self._catalog.resolve(result["entity"])
+                if entity is None:
+                    result = {"ok": False, "error": f"实体 {result['entity']!r} 不在在线版本里"}
+                else:
+                    rows = result.pop("__rows__", [])
+                    table = {"columns": [{"key": f.column, "title": _label(f), "type": f.type}
+                                         for f in entity.fields],
+                             "rows": rows, "total": result.get("total", 0),
+                             "entity": entity.entity, "display": entity.display_name,
+                             "toolCall": {"name": name, "args": args}}
+                    pending_events.append({"type": "table", "table": table,
+                                           "replace": True})  # 同一轮只展示最新一张表
+
+            if name == "aggregate_records" and result.get("ok"):
+                # 聚合结果过去只有一行「共 N 条」的正文，用户看不到分组明细。
+                # 这里补一张表（带 chart 元数据），前端才能既给表又给图。
+                aggregate = self._aggregate_table(result, args)
+                if aggregate is not None:
+                    table = aggregate
+                    pending_events.append({"type": "table", "table": table, "replace": True})
+
+            # 工具轨迹一条事件说完：叫什么、传了什么、成没成、花了多久。
+            # 前端据此画可折叠的调用轨迹（《前端交互设计》11.3），
+            # 而不是把它塞进助手正文——正文被调用日志埋掉是最难读的界面。
+            events.append({
+                "type": "tool_call", "name": name, "args": _brief_args(args),
+                "ok": bool(result.get("ok")),
+                "error": (str(result.get("error") or "")[:200]
+                          if not result.get("ok") else ""),
+                "ms": round((time.perf_counter() - started) * 1000, 1),
+            })
+            events.extend(pending_events)
 
             if result.get("status") == "need_confirmation":
                 # 预告文案来自产物侧，平台不加工（与既有对话层同一纪律）
                 summary = result.get("summary", "")
                 reply = summary + "。确认请回复「确认」。"
+                # 确认前查过的表格也要落库，否则历史里只剩一句「将删除」没有依据
+                saved = self._persist_table({**state, "table": table,
+                                             "table_saved": saved})
                 session.append("assistant", "confirm", {"summary": summary})
                 events.append({"type": "confirm", "summary": summary, "text": reply})
                 stop = True
 
+            tool_payload = {k: v for k, v in result.items() if k != "__rows__"}
+            if not result.get("ok"):
+                error_text = str(result.get("error") or result.get("message") or "调用失败")
+                last_error = error_text
+                tool_payload["hint"] = "请根据错误修正参数后重试；无法修正就向用户说明原因。"
             state["llm_messages"].append({
                 "role": "tool", "tool_call_id": call["id"],
-                "content": json.dumps({k: v for k, v in result.items() if k != "__rows__"},
-                                      ensure_ascii=False)})
-            events.append({"type": "tool_result", "name": name, "ok": bool(result.get("ok"))})
+                "content": json.dumps(tool_payload, ensure_ascii=False)})
 
         return {"llm_messages": state["llm_messages"], "tool_rounds": rounds,
                 "events": events, "stop": stop, "table": table,
-                "tool_calls": [], "reply": reply}
+                "tool_calls": [], "reply": reply,
+                "table_saved": saved, "last_tool_error": last_error}
+
+    def _persist_table(self, state: dict) -> bool:
+        """把本轮最终表格写进会话历史（只写一次、只写前 50 行）。
+
+        表格是「结论」的一部分：历史里只留「共 N 条」会让重开的对话看不出
+        当时到底查到了什么（也是用户反馈「历史显示异常」的直接原因）。
+        kind/chart 也要一起落库，否则重开历史只能看表、画不出图。
+        """
+        table = state.get("table")
+        if not table or state.get("table_saved"):
+            return bool(state.get("table_saved"))
+        rows = table.get("rows") or []
+        kept = rows[:MAX_HISTORY_ROWS]
+        content = {"entity": table.get("entity"), "display": table.get("display"),
+                   "columns": table.get("columns") or [], "rows": kept,
+                   "total": table.get("total", len(rows)), "displayed": len(kept)}
+        if table.get("kind"):
+            content["kind"] = table["kind"]
+        if table.get("chart"):
+            content["chart"] = table["chart"]
+        state["session"].append("assistant", "table", content,
+                                tool_call=table.get("toolCall"))
+        state["table_saved"] = True
+        return True
+
+    def _aggregate_table(self, result: dict, args: dict) -> dict | None:
+        """把聚合结果包成一张表：分组列用实体的中文语义，度量列用别名。
+
+        这样同一份数据在界面上有两种看法——表格看精确值，图表看分布。
+        列名从结果行反推而不是照抄参数：别名归一化发生在 ToolBox 里，
+        这里的原始 args 已经对不上了。
+        """
+        rows = result.get("rows") or []
+        if not isinstance(rows, list) or not rows:
+            return None
+        entity = self._catalog.resolve(str(result.get("entity", "")))
+
+        keys: list[str] = []
+        for row in rows:
+            if isinstance(row, dict):
+                keys.extend(key for key in row if key not in keys)
+
+        columns, dimensions, measures = [], [], []
+        for key in keys:
+            field = entity.field(key) if entity is not None else None
+            if field is not None:
+                columns.append({"key": key, "title": _label(field), "type": field.type})
+                numeric = _is_numeric_type(field.type)
+            else:
+                sample = next((row.get(key) for row in rows
+                               if isinstance(row, dict) and row.get(key) is not None), None)
+                columns.append({"key": key, "title": key, "type": _guess_type(sample)})
+                numeric = _is_numeric_type(_guess_type(sample))
+            (measures if numeric else dimensions).append(key)
+
+        if not measures:
+            return None   # 只有分组没有度量，画不出图，也没必要单独成表
+
+        return {
+            "entity": entity.entity if entity is not None else result.get("entity"),
+            "display": (f"{entity.display_name} · 分组统计"
+                        if entity is not None else "分组统计"),
+            "columns": columns, "rows": rows,
+            "total": len(rows), "displayed": len(rows),
+            "kind": "aggregate",
+            "chart": {"dimensions": dimensions, "measures": measures},
+            "toolCall": {"name": "aggregate_records", "args": args},
+        }
+
+    @staticmethod
+    def _fallback_reply(state: dict) -> str:
+        """没有最终回复时的确定性兜底：有表报条数，有错说原因，都没有请重说。"""
+        table = state.get("table") or {}
+        display = table.get("display") or table.get("entity") or "数据"
+        total = table.get("total")
+        if total is not None:
+            if total:
+                return (f"已查询到 {total} 条{display}，结果见上方表格。"
+                        "需要继续筛选、排序或统计，直接告诉我条件即可。")
+            return f"没有查询到符合条件的{display}，可以换个条件再试。"
+        error = state.get("last_tool_error")
+        if error:
+            return f"这次操作没有成功：{error}。可以补充更具体的条件，或换个说法再试。"
+        return "我这边没有生成有效回复，请再描述一次需求。"
 
     async def _report_feature_request(self, session, error_text: str, state: AgentState) -> None:
         """把「用户要了但系统没有」上报需求池（底座扩展 v0.1）。
@@ -345,6 +528,54 @@ def _label(field) -> str:
     for separator in ("，", ",", "；", ";", "（", "(", "。"):
         text = text.split(separator)[0]
     return (text[:12] or field.column).strip()
+
+
+def _ask_content(kind: str, text: str, options: list | None = None,
+                 items: list | None = None) -> dict:
+    """追问消息的结构化载荷：text 是给模型与历史看的原话，
+    options（点选即发送）与 items（待填问题）是给界面渲染的。"""
+    return {"kind": kind, "text": text,
+            "options": options or [], "items": items or []}
+
+
+def _brief_args(value, depth: int = 0):
+    """工具参数瘦身：结构留着（前端要按键名展示），字符串截断到 120 字。
+
+    不整体转成字符串的原因：前端按 `filter` / `groupBy` / `metrics` 的结构
+    渲染标签，压成字符串就只剩一坨 JSON 了。SSE 每条事件都走一遍网络，
+    长文本必须在这里截住。
+    """
+    if depth > 3:
+        return "…"
+    if isinstance(value, dict):
+        return {str(key): _brief_args(item, depth + 1)
+                for key, item in value.items() if item is not None}
+    if isinstance(value, (list, tuple)):
+        return [_brief_args(item, depth + 1) for item in list(value)[:8]]
+    if isinstance(value, str):
+        return value[:120]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:120]
+
+
+def _is_numeric_type(sql_type: str | None) -> bool:
+    """SQL 类型 → 能不能当度量。与前端 lib/columns.js 保持同一套判定口径。"""
+    base = str(sql_type or "").split("(")[0].strip().upper()
+    return base in {"TINYINT", "SMALLINT", "MEDIUMINT", "INT", "INTEGER", "BIGINT",
+                    "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "REAL", "NUMBER",
+                    "BIT", "MONEY"}
+
+
+def _guess_type(sample) -> str:
+    """聚合别名列没有元数据：按首个非空值猜一个类型，够前端对齐与格式化用。"""
+    if isinstance(sample, bool):
+        return "TINYINT"
+    if isinstance(sample, int):
+        return "BIGINT"
+    if isinstance(sample, float):
+        return "DECIMAL"
+    return "VARCHAR"
 
 
 def _last_user_text(session) -> str | None:

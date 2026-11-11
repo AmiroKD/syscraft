@@ -16,6 +16,10 @@ MAX_ROUNDS_VERBATIM = 12
 _FULL_ROWS = 5
 _PARTIAL_ROWS = 50
 
+# 单条历史消息进上下文的硬上限。表格消息现在会把行数据一起落库（重开时才能
+# 还原表格），但给模型看的历史只能是一句话——不然一次 200 行的查询就把窗口塞满。
+MAX_CONTENT_CHARS = 1200
+
 
 def tool_result_for_llm(rows: list[dict], total: int) -> dict[str, Any]:
     """查询结果瘦身：≤5 行全字段；6–50 行表头+前 3 行+总数；>50 行表头+总数+聚合提示。"""
@@ -58,11 +62,40 @@ def llm_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
     for rnd in recent:
         for message in rnd:
             role = "user" if message["role"] == "user" else "assistant"
-            content = message["content"]
-            if message.get("type") == "table":
-                content = f"{_brief(content) if isinstance(content, str) else content}"
-            result.append({"role": role, "content": _as_text(content)})
+            content = _history_text(message)
+            if content:
+                result.append({"role": role, "content": content})
     return result
+
+
+def _history_text(message: dict[str, Any]) -> str:
+    """单条消息压成给模型看的一句话。
+
+    结构化消息（表格/计划/确认）只留「发生了什么 + 关键数字」，行数据一律不进
+    ——模型不需要复述数据，它只需要知道上一轮查过什么、要不要接着查。
+    """
+    type_ = message.get("type")
+    content = message.get("content")
+    if type_ == "table" and isinstance(content, dict):
+        display = content.get("display") or content.get("entity") or "数据"
+        total = content.get("total", content.get("displayed", 0))
+        return f"（查询结果：{display} 共 {total} 条，明细已在界面上展示）"
+    if type_ == "confirm" and isinstance(content, dict):
+        return f"（系统已给出删除预告：{str(content.get('summary', ''))[:120]}）"
+    if type_ == "plan" and isinstance(content, dict):
+        return f"（生成计划：{str(content.get('summary', ''))[:200]}）"
+    if type_ == "ask" and isinstance(content, dict):
+        # 追问卡在界面上是可点选的表单/选项，模型只需要知道「上一轮问了什么」
+        return f"（系统向用户追问：{str(content.get('text', ''))[:200]}）"
+    if type_ == "error" and isinstance(content, dict):
+        return f"（处理失败：{str(content.get('message', ''))[:200]}）"
+    if type_ == "notice":
+        # 暂停说明是给用户看的界面提示，不是对话内容：喂给模型会变成
+        # 「助手说自己被暂停了」，下一轮容易被它当作上下文接着演
+        return ""
+    if content is None:
+        return ""
+    return _as_text(content)[:MAX_CONTENT_CHARS]
 
 
 def _brief(content: Any) -> str:

@@ -157,8 +157,14 @@ class GenerationFlow:
             lines = "\n".join(f"{i}. {q.question}（默认：{q.default}）"
                               for i, q in enumerate(result.questions, 1))
             reply = f"开始建模前有几个问题（直接回复答案即可，或回复「按默认」跳过）：\n{lines}"
-            session.append("assistant", "text", reply)
-            return {"reply": reply}
+            # 追问走结构化事件：前端渲染成表单卡（逐项填写 / 一键按默认），
+            # 答案仍以普通消息回传——抽取层不感知界面形态，两轮协议不变
+            content = {"kind": "clarify", "text": reply,
+                       "items": [{"question": q.question, "default": q.default}
+                                 for q in result.questions],
+                       "options": [{"label": "全部按默认", "value": "按默认"}]}
+            session.append("assistant", "ask", content)
+            return {"reply": reply, "event": {"type": "ask", **content}}
 
         return self._present_plan(result, session)
 
@@ -182,9 +188,11 @@ class GenerationFlow:
         entities = "、".join(e["display_name"] for e in model["entities"])
         reply = (f"需求已理解，将生成{len(model['entities'])}个实体：{entities}。\n\n"
                  f"{result.plan}\n\n确认无误请回复「确认生成」（版本号在确认时分配），要调整直接重新描述。")
-        session.append("assistant", "plan", {"summary": reply, "version": "",
-                                             "assumptions": result.assumptions})
-        return {"reply": reply}
+        content = {"summary": reply, "version": "", "assumptions": result.assumptions}
+        session.append("assistant", "plan", content)
+        # 计划以 plan 事件回传：流式过程中前端就渲染成计划卡（带确认按钮），
+        # 而不是等刷新后从历史里才看到
+        return {"reply": reply, "event": {"type": "plan", **content}}
 
     def _present_amend_plan(self, request, session) -> dict:
         """增量修改的计划：在在线版本模型上追加一个字段，确认后走迁移流水线。
@@ -235,11 +243,12 @@ class GenerationFlow:
                  f"（列名 {spec.column}，类型 {type_label}，允许为空，存量数据不受影响）。\n\n"
                  "确认后执行：ALTER TABLE 加列 → 新版本重渲染 → 编译 → 上线 → 自动验收，约 2 分钟。\n"
                  "确认请回复「确认生成」；取消回复「取消」。")
-        session.append("assistant", "plan", {
+        content = {
             "summary": reply, "version": "", "kind": "amend",
             "field": {"column": spec.column, "type": type_label, "semantic": spec.semantic},
-        })
-        return {"reply": reply}
+        }
+        session.append("assistant", "plan", content)
+        return {"reply": reply, "event": {"type": "plan", **content}}
 
     @staticmethod
     def _sweep_plans(max_age_seconds: int = 86400) -> None:
@@ -280,7 +289,9 @@ class GenerationFlow:
             return {"reply": "另一个会话正在生成系统，请稍后再试。"}
         await generation_lock.acquire()
         # 锁一旦拿到，初始化段的任何异常都必须自己释放：否则全局锁永久占用，
-        # 全平台 /api/chat 从此 503，只能重启进程（审查 P0：模型文件损坏即触发）
+        # 全平台 /api/chat 从此 503，只能重启进程（审查 P0：模型文件损坏即触发）。
+        # 用 BaseException：暂停是通过 task.cancel() 打断派发的，CancelledError 不是
+        # Exception——漏掉它会在「锁已拿到、gen_state 还没置 running」的窗口里泄漏锁
         try:
             model = json.loads(model_path.read_text(encoding="utf-8"))
             amend_mode = session.get_slot("gen_mode") == "amend"
@@ -304,7 +315,7 @@ class GenerationFlow:
             except (TypeError, ValueError):
                 self._running_owner = None
             self._cancel.clear()
-        except Exception:
+        except BaseException:
             generation_lock.release()
             session.set_slot("gen_state", None)
             session.set_slot("gen_mode", None)

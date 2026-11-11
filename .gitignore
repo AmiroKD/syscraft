@@ -25,5 +25,11 @@ logs/
 .vscode/
 
 # 前端依赖与构建
+# web/dist 例外：前端构建产物随仓库提交，保证只有 Python 环境也能直接起服务
 node_modules/
 dist/
+!agent-platform/web/dist/
+!agent-platform/web/dist/**
+
+# 待确认的加字段计划文件：确认转正为 auto_gen.vN.json 才入库
+agent-platform/models/plan.*.json

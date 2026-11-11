@@ -88,9 +88,7 @@ def catalog():
 
 @pytest.fixture()
 def store(catalog):
-    root = Path(tempfile.mkdtemp(prefix="syscraft-agent-sess-"))
-    yield SessionStore(root=root / "sessions")
-    shutil.rmtree(root, ignore_errors=True)
+    return SessionStore()
 
 
 def install_llm(monkeypatch, script: list[dict]):
@@ -155,6 +153,12 @@ async def test_pronoun_without_slot_asks_back(monkeypatch, catalog, store):
     final = await agent.run("它有多少条", "tk", session)
     assert "哪张表" in final["reply"]
     assert script  # LLM 一次都没被调用——槽位为空就追问，不靠模型猜（设计 3.2 ③）
+    # 追问发结构化事件：前端渲染成可点选的追问卡（候选项 = 在线实体）
+    ask = next(e for e in final["events"] if e["type"] == "ask")
+    assert ask["kind"] == "entity"
+    assert ask["options"] and ask["options"][0]["value"].startswith("查一下")
+    # 追问按 ask 类型落库：刷新后仍渲染成卡片而不是普通文本
+    assert ("assistant", "ask") in [(m["role"], m["type"]) for m in session.messages()]
 
 
 @pytest.mark.anyio
@@ -266,3 +270,169 @@ async def test_unknown_entity_rejected(monkeypatch, catalog, store):
     tool_message = next(m for m in seen[1] if m["role"] == "tool")
     assert "employee" in json.loads(tool_message["content"])["error"]
     assert final["reply"] == "没有员工表。"
+
+
+# ---------------------------------------------------------------- 历史与兜底
+
+@pytest.mark.anyio
+async def test_table_history_saved_once_with_rows(monkeypatch, catalog, store):
+    """历史重开要能还原表格：落库必须带 columns/rows，且一轮只留最终一张。"""
+    install_llm(monkeypatch, [
+        tool_call("query_records", {"entity": "trade_order"}, "c1"),
+        text_call("共 2 条订单。"),
+    ])
+    agent = BusinessAgent(FakeClient(), catalog)
+    session = store.create(user_id=1)
+
+    await agent.run("查订单", "tk", session)
+
+    tables = [m for m in session.messages() if m["type"] == "table"]
+    assert len(tables) == 1
+    content = tables[0]["content"]
+    assert content["entity"] == "trade_order" and content["total"] == 2
+    assert content["columns"][0]["key"] == "id"
+    assert content["rows"][0]["order_no"] == "SO-1"
+
+
+@pytest.mark.anyio
+async def test_round_limit_returns_fallback_reply(monkeypatch, catalog, store):
+    """模型反复查询撞上轮次上限时，不能「有表格没结论」地静默结束。"""
+    script = [tool_call("query_records", {"entity": "trade_order"}, f"c{i}") for i in range(10)]
+    install_llm(monkeypatch, script)
+    agent = BusinessAgent(FakeClient(), catalog)
+    session = store.create(user_id=1)
+
+    final = await agent.run("查订单", "tk", session)
+
+    assert "已查询到 2 条订单" in final["reply"]
+    assert len([m for m in session.messages() if m["type"] == "table"]) == 1
+
+
+@pytest.mark.anyio
+async def test_malformed_arguments_fed_back_not_crash(monkeypatch, catalog, store):
+    """参数 JSON 坏了要以工具结果回灌，模型下一轮能自己改对。"""
+    seen = install_llm(monkeypatch, [
+        {"content": None, "tool_calls": [{
+            "id": "c1", "name": "query_records", "arguments": {},
+            "arguments_error": "工具参数不是合法 JSON",
+        }]},
+        text_call("我换个写法再查。"),
+    ])
+    agent = BusinessAgent(FakeClient(), catalog)
+    session = store.create(user_id=1)
+
+    final = await agent.run("查订单", "tk", session)
+
+    assert final["reply"] == "我换个写法再查。"
+    tool_message = next(m for m in seen[1] if m["role"] == "tool")
+    assert "不是合法 JSON" in tool_message["content"]
+
+
+@pytest.mark.anyio
+async def test_tool_exception_does_not_kill_turn(monkeypatch, catalog, store):
+    class ExplodingClient(FakeClient):
+        async def query(self, entity, request, token):
+            raise ValueError("boom")
+
+    seen = install_llm(monkeypatch, [
+        tool_call("query_records", {"entity": "trade_order"}, "c1"),
+        text_call("查询出错了。"),
+    ])
+    agent = BusinessAgent(ExplodingClient(), catalog)
+    session = store.create(user_id=1)
+
+    final = await agent.run("查订单", "tk", session)
+
+    assert final["reply"] == "查询出错了。"
+    tool_message = next(m for m in seen[1] if m["role"] == "tool")
+    payload = json.loads(tool_message["content"])
+    assert payload["ok"] is False and "boom" in payload["error"]
+
+
+@pytest.mark.anyio
+async def test_cancel_pending_confirm(monkeypatch, catalog, store):
+    install_llm(monkeypatch, [
+        tool_call("delete_records", {"entity": "trade_order", "filter": {
+            "op": "AND", "conditions": [{"field": "order_no", "operator": "EQ", "value": "SO-1"}]}}, "c1"),
+    ])
+    client = FakeClient()
+    agent = BusinessAgent(client, catalog)
+    session = store.create(user_id=1)
+
+    await agent.run("删除订单，订单号是SO-1", "tk", session)
+    assert session.get_slot("pending_confirm") is not None
+
+    final = await agent.run("取消", "tk", session)
+
+    assert "已取消" in final["reply"]
+    assert session.get_slot("pending_confirm") is None
+    assert not any(call[0] == "delete" for call in client.calls)
+
+
+# ------------------------------------------------ 前端渲染所需的事件（Vue 重构后新增）
+
+@pytest.mark.anyio
+async def test_tool_call_event_carries_args_and_duration(monkeypatch, catalog, store):
+    """工具轨迹靠一条 tool_call 事件画出来：名字、参数、成败、耗时都在这。"""
+    install_llm(monkeypatch, [
+        tool_call("query_records", {"entity": "trade_order", "size": 20}, "c1"),
+        text_call("共 2 条订单。"),
+    ])
+    final = await BusinessAgent(FakeClient(), catalog).run("查订单", "tk", store.create(user_id=1))
+
+    calls = [e for e in final["events"] if e["type"] == "tool_call"]
+    assert len(calls) == 1
+    assert calls[0]["name"] == "query_records"
+    assert calls[0]["args"]["entity"] == "trade_order"
+    assert calls[0]["ok"] is True
+    assert calls[0]["error"] == ""
+    assert calls[0]["ms"] >= 0
+
+
+@pytest.mark.anyio
+async def test_failed_tool_call_event_marks_error(monkeypatch, catalog, store):
+    """失败也要留下轨迹：用户要看得见「试过、错在哪」，而不是只有一句处理失败。"""
+    install_llm(monkeypatch, [
+        tool_call("query_records", {"entity": "no_such_entity"}, "c1"),
+        text_call("没有这张表。"),
+    ])
+    final = await BusinessAgent(FakeClient(), catalog).run("查不存在的表", "tk", store.create(user_id=1))
+
+    calls = [e for e in final["events"] if e["type"] == "tool_call"]
+    assert calls and calls[0]["ok"] is False and calls[0]["error"]
+
+
+@pytest.mark.anyio
+async def test_aggregate_emits_chartable_table(monkeypatch, catalog, store):
+    """聚合结果要变成一张表 + chart 元数据，前端才能既给表又给图。"""
+    install_llm(monkeypatch, [
+        tool_call("aggregate_records", {"entity": "trade_order",
+                                        "groupBy": ["order_no"],
+                                        "metrics": [{"func": "COUNT", "alias": "cnt"}]}, "c1"),
+        text_call("统计完成。"),
+    ])
+    session = store.create(user_id=1)
+    final = await BusinessAgent(FakeClient(), catalog).run("按订单号统计", "tk", session)
+
+    tables = [e["table"] for e in final["events"] if e["type"] == "table"]
+    assert tables, "聚合结果必须产出表格事件"
+    table = tables[0]
+    assert table["kind"] == "aggregate"
+    assert [c["key"] for c in table["columns"]] == ["status", "cnt"]   # 取自假产物的返回行
+    assert table["chart"] == {"dimensions": ["status"], "measures": ["cnt"]}
+    assert table["display"] == "订单 · 分组统计"
+
+    saved = [m for m in session.messages() if m["type"] == "table"]
+    assert saved and saved[-1]["content"]["chart"]["measures"] == ["cnt"]
+
+
+def test_aggregate_table_uses_semantic_title_for_group_column(catalog):
+    """分组列有中文语义就用中文（「订单号」而不是 order_no）。"""
+    agent = BusinessAgent(FakeClient(), catalog)
+    table = agent._aggregate_table(
+        {"entity": "trade_order", "rows": [{"order_no": "SO-1", "cnt": 2}]},
+        {"groupBy": ["order_no"], "metrics": [{"func": "COUNT", "alias": "cnt"}]},
+    )
+    assert table["columns"][0] == {"key": "order_no", "title": "订单号", "type": "VARCHAR"}
+    assert table["columns"][1]["key"] == "cnt" and table["columns"][1]["type"] == "BIGINT"
+    assert table["chart"]["dimensions"] == ["order_no"]

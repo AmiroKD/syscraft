@@ -47,3 +47,19 @@ def test_history_table_type_becomes_one_line():
     history = llm_history(messages)
     assert len(history) == 2
     assert "128" in history[1]["content"]  # 表格只留关键字段，不带行数据
+
+
+def test_history_table_rows_never_enter_context():
+    """表格落库带行数据（给界面还原），但给模型的历史只能是一句话。"""
+    messages = [
+        {"role": "user", "type": "text", "content": "查活动"},
+        {"role": "assistant", "type": "table", "content": {
+            "entity": "activity", "display": "活动", "total": 5,
+            "rows": [{"name": "不该进上下文的行数据"}],
+        }},
+        {"role": "assistant", "type": "text", "content": "共 5 条。"},
+    ]
+    history = llm_history(messages)
+    joined = "\n".join(m["content"] for m in history)
+    assert "不该进上下文的行数据" not in joined
+    assert "活动 共 5 条" in joined

@@ -1,0 +1,72 @@
+/* ==========================================================================
+   设计令牌：低饱和中性色 + 单一强调色。
+   深浅色共用一套变量，组件里只用 var()，不写死颜色——图表从同一批变量取色，
+   保证「表格里的红绿」和「图表里的红绿」是同一个红绿。
+   ========================================================================== */
+
+:root {
+  --bg: #ffffff;
+  --bg-soft: #fafafa;
+  --sidebar: #f7f7f8;
+  --surface: #ffffff;
+  --surface-2: #f2f3f5;
+  --surface-3: #e9eaee;
+  --line: #e8e9ec;
+  --line-strong: #d7d9df;
+  --ink: #1c1d21;
+  --ink-2: #62646c;
+  --ink-3: #9799a3;
+  --accent: #2f6fed;
+  --accent-hover: #245fd6;
+  --accent-soft: #eef3ff;
+  --accent-ink: #ffffff;
+  --user-bubble: #f0f1f3;
+  --code-bg: #f5f5f7;
+  --ok: #1f8b4c;
+  --ok-soft: #eaf6ef;
+  --warn: #a86500;
+  --warn-soft: #fff7e8;
+  --danger: #d64545;
+  --danger-soft: #fdf0f0;
+  --shadow-sm: 0 1px 2px rgba(18, 20, 26, .05);
+  --shadow-md: 0 6px 24px rgba(18, 20, 26, .08);
+  --shadow-lg: 0 24px 70px rgba(15, 17, 22, .18);
+  --radius: 12px;
+  --scale: 1;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+          "Segoe UI", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+html[data-theme="dark"] {
+  --bg: #16171a;
+  --bg-soft: #1a1b1f;
+  --sidebar: #101114;
+  --surface: #1e1f24;
+  --surface-2: #26272d;
+  --surface-3: #30323a;
+  --line: #2b2c33;
+  --line-strong: #3a3c45;
+  --ink: #ececf1;
+  --ink-2: #a8aab4;
+  --ink-3: #7d7f8a;
+  --accent: #6d97ff;
+  --accent-hover: #83a7ff;
+  --accent-soft: #1d2942;
+  --accent-ink: #0f1420;
+  --user-bubble: #2a2c33;
+  --code-bg: #202127;
+  --ok: #57c98a;
+  --ok-soft: #16281f;
+  --warn: #e2a94a;
+  --warn-soft: #2a2317;
+  --danger: #ff7b7b;
+  --danger-soft: #2c1b1c;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-md: 0 8px 30px rgba(0, 0, 0, .45);
+  --shadow-lg: 0 28px 80px rgba(0, 0, 0, .6);
+}
+
+html[data-font="sm"] { --scale: .92; }
+html[data-font="md"] { --scale: 1; }
+html[data-font="lg"] { --scale: 1.08; }

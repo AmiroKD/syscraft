@@ -21,10 +21,14 @@ code/
 │   │   └── prompt/
 │   ├── templates/         # 代码模板（修复循环不可写）
 │   ├── tests/
-│   └── workspace/         # 运行期产物（不进版本库）
+│   ├── web/               # Vue 3 前端：src 源码 + dist 构建产物（由平台托管）
+│   └── workspace/         # 运行期产物（不进版本库；会话不再落这里）
 └── spring-skeleton/       # Java 固定骨架：platform/ 96 个类
     └── src/main/java/com/generated/platform/
 ```
+
+三份存储各归各的：`adm`（权限）、`biz`（业务）归产物，`chat`（会话）归平台。
+平台账号只授权 `chat.*`——越权写权限库会被 MySQL 直接拒绝。
 
 设计与交接文档在仓库外：`../output/`。**开工先读 `../output/开发起手指南-v1.0.md`。**
 
@@ -44,6 +48,56 @@ uv pip install -r requirements.lock --python .venv/bin/python
 ```bash
 set -a; source ~/.adaptive/db.env; set +a   # 少了 set -a，Java 读不到 APP_PWD
 ```
+
+会话库要建一次（幂等，只在缺 `CHAT_DB_*` 时执行）：
+
+```bash
+./scripts/init_chat_db.sh    # 建 chat / chat_test + 只授权这两库的 chat 账号
+```
+
+## 跑测试
+
+```bash
+set -a; source ~/.adaptive/db.env; set +a    # 测试要用 chat_test
+PYTHONPATH=src .venv/bin/python -m pytest -q
+```
+
+测试固定打 `chat_test`（`tests/conftest.py` 强制），库名不以 `_test` 结尾直接拒绝清表。
+
+## 前端（Vue 3 + Vite）
+
+界面是独立的 Vue 工程，源码在 `agent-platform/web/`，构建产物在 `web/dist/`：
+
+```bash
+cd agent-platform/web
+npm install
+npm run build      # 产出 web/dist，FastAPI 的 / 与 /assets 直接托管
+```
+
+- **构建产物随仓库提交**，所以只有 Python 环境、不装 Node 也能直接起服务看界面；
+  改了前端源码要重新 `npm run build`，否则页面还是旧的；
+- `npm run dev` 起 Vite（5173），`/api` 代理到 8090，改样式时热更新更方便；
+- **不想连后端看界面**：开 `http://127.0.0.1:8090/?demo=1`，会用一份示例会话
+  渲染工具调用轨迹、表格、图表、生成计划与生成进度，答辩现场没有产物/Key 时也能演示。
+
+结构：`src/lib/`（请求、SSE、Markdown、列格式化、图表推断）、`src/stores/`
+（auth / chat / event / settings / ui）、`src/components/`（20 个单文件组件）。
+表格与图表是同一张卡片的两个视图——数据只有一份，看法可以切换。
+
+## 更换模型 / 自定义接入
+
+登录后左下角用户菜单 →「设置 → 模型服务」可以自行填写：
+
+- **API Base URL**：填到 `/v1` 为止，平台自动拼接 `/chat/completions`；
+- **API Key**：由用户填写，表单内容缓存在当前浏览器；保存后写入
+  `~/.adaptive/llm-settings.json`（权限 600，与 db.env 同目录）供平台调用。
+  读取接口只返回“是否已配置”，不回传 URL / Key / 模型；
+- **模型名**：完全自由填写，没有预置清单或默认值，按你的服务商文档填模型 ID 即可。
+
+表单默认空白起步，不用服务端环境变量回填——填过的内容保存在当前浏览器
+（localStorage），下次打开自动恢复；公共电脑可用「清除本机缓存」清掉。
+建议先点「测试连接」（最小补全，验证 URL / Key / 模型是否真的可用），再「保存并应用」。
+保存后对对话、生成、修复循环全局生效，不需要重启平台。
 
 ## 一次完整生成（一条命令）
 
@@ -114,6 +168,19 @@ curl -s -X POST localhost:8090/api/chat -H "Authorization: Bearer $TOKEN" \
 
 当前范围：意图解析是**规则版**（认实体、「字段 是 值」、条数），只支持查询；写入类请求会明确拒绝而不是静默当成查询。
 LLM 版实现同一个 `IntentResolver` 协议即可替换，编排层不动。
+
+## 暂停与刷新恢复
+
+- **暂停**：回答途中输入区的发送键换成暂停键，`POST /api/chat/pause` 停下这一轮。
+  已经查出来的表格与一句说明会落进历史——不是「冻结后原地继续」：补全是一次非流式
+  请求，服务端没有可续的中间态（要接着问，重发一句即可，上下文还在会话里）。
+- **刷新**：会话消息接口带回 `run: {active, seq, mode}`，前端若见 `active` 就带
+  `resume=1&after_seq=<seq>` 把事件流接回来，结束后重拉一次历史对账补齐；
+  刷新不等于重发，接管连接只读跟随。
+- **生成流水线不走暂停**：编译跑在 `to_thread` 里，取消任务停不了线程；出口仍是
+  进度面板上的「取消生成」（步骤边界生效）。
+
+设计见 `../output/暂停与刷新恢复设计-v1.0.md`。
 
 
 ## 约定

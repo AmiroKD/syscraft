@@ -7,7 +7,37 @@ catalog() 是进程级 lru_cache 单例：任何测试在 patch 过 MODELS_DIR �
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+# 必须在任何 syscraft 模块导入之前定死：config 在导入时读环境变量。
+# 会话现在落在 MySQL，测试绝不能指向真实的 chat 库——那会把用户的会话清空。
+os.environ["CHAT_DB_NAME"] = "chat_test"
+
+
+@pytest.fixture(autouse=True)
+def _clean_chat_schema():
+    """每个用例前清空会话表。
+
+    三道闸：库名必须以 _test 结尾、只 TRUNCATE 三张会话表、连不上库时静默跳过——
+    纯单测（不碰会话）不该因为本机没起 MySQL 就全红，真正用到库的用例会自己报错。
+    """
+    from syscraft import config
+    from syscraft.conversation.store import SessionStore
+
+    if not config.CHAT_DB_NAME.endswith("_test"):
+        raise RuntimeError(f"测试只允许清空 _test 结尾的库，当前是 {config.CHAT_DB_NAME!r}")
+    try:
+        store = SessionStore()
+        with store._cursor() as cur:
+            cur.execute("SET FOREIGN_KEY_CHECKS = 0")
+            for table in ("chat_message", "chat_slot", "chat_session"):
+                cur.execute(f"TRUNCATE TABLE {table}")
+            cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+    except Exception:  # noqa: BLE001 库不可达不在这里拦，交给具体用例暴露
+        pass
+    yield
 
 
 @pytest.fixture(autouse=True)

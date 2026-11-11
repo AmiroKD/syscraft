@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-font="md">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SysCraft · 语构</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232f6fed'/%3E%3Ctext x='32' y='44' font-size='36' font-family='-apple-system,sans-serif' font-weight='700' fill='white' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E" />
+  <script>
+    /* 主题必须在首屏绘制前确定，否则深色模式会闪一帧白 */
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem("syscraft.settings") || "{}");
+        var theme = s.theme || "system";
+        var dark = theme === "dark"
+          || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.dataset.font = s.fontSize || "md";
+      } catch (e) { /* 存储不可用时用默认值 */ }
+    })();
+  </script>
+  <script type="module" crossorigin src="/assets/index-CbXJZHBd.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/markdown-BIcAhod3.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-DnfLyMfG.css">
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>

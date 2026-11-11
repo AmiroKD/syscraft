@@ -30,8 +30,21 @@ class EntityInfo:
     fields: tuple[FieldInfo, ...]
 
     def field(self, column_or_property: str) -> FieldInfo | None:
+        """按列名 / 属性名 / 中文语义精确找字段。
+
+        语义名也在这里认：模型偶尔会把「活动名称」当字段名传下来（prompt 里
+        同时给了 column 与 semantic），只认列名时会直接报「字段不在表里」，
+        白白浪费一轮工具调用。精确匹配语义是安全的——子串匹配才危险
+        （user_id 会误命中 id，见 match_field 注释）。
+        """
+        name = str(column_or_property or "").strip()
+        if not name:
+            return None
         for field in self.fields:
-            if column_or_property in (field.column, field.property):
+            if name in (field.column, field.property):
+                return field
+        for field in self.fields:
+            if field.semantic and name == field.semantic:
                 return field
         return None
 
@@ -97,6 +110,33 @@ class ModelCatalog:
 
     def by_name(self, name: str) -> EntityInfo | None:
         return self._entities.get(name)
+
+    def resolve(self, name: str) -> EntityInfo | None:
+        """容错解析实体名：表名 / 中文名 / 「活动表」这类口语写法。
+
+        工具参数是模型生成的，`entity` 传成「活动」并不罕见；只认表名会让
+        一次本来正确的查询变成「实体不存在」，用户看到的就是「工具老是失败」。
+        """
+        raw = str(name or "").strip()
+        if not raw:
+            return None
+        if raw in self._entities:
+            return self._entities[raw]
+        lowered = raw.lower()
+        for info in self._entities.values():
+            if info.entity.lower() == lowered:
+                return info
+        for info in self._entities.values():
+            if info.display_name and info.display_name == raw:
+                return info
+        # 口语后缀：活动表 / 活动记录 / 图书信息
+        for suffix in ("表", "记录", "信息"):
+            if raw.endswith(suffix) and len(raw) > len(suffix):
+                trimmed = raw[: -len(suffix)]
+                for info in self._entities.values():
+                    if info.display_name == trimmed or info.entity == trimmed:
+                        return info
+        return None
 
 
 def reset_catalog_cache() -> None:

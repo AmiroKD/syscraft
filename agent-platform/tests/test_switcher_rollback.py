@@ -14,15 +14,25 @@ from __future__ import annotations
 
 import pytest
 
+import syscraft.config
 import syscraft.runtime.pipeline as pipeline_module
 import syscraft.runtime.switcher as switcher_module
 from syscraft.runtime.switcher import SwitchError
 
 
 @pytest.fixture()
-def isolated(monkeypatch):
+def isolated(monkeypatch, tmp_path):
     """假接所有外部接触面：状态探测、端口探测、状态登记。
-    （_port_busy/_healthy 是 switch 内部从 pipeline 惰性导入的，要打在源头）"""
+    （_port_busy/_healthy 是 switch 内部从 pipeline 惰性导入的，要打在源头）
+
+    jar 存在性检查走真实文件系统，本机 workspace/versions 里恰好有构建产物时
+    才能通过——workspace/ 被 gitignore，全新环境（CI/答辩机器）必然没有。
+    在临时 PROJECT_ROOT 下伪造 v2/v7 产物目录，测试自包含，不再看本机状态。"""
+    for version in ("v2", "v7"):
+        jar = tmp_path / "workspace/versions" / version / "target/syscraft-skeleton-0.1.0.jar"
+        jar.parent.mkdir(parents=True)
+        jar.write_bytes(b"")
+    monkeypatch.setattr(syscraft.config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(pipeline_module, "_port_busy", lambda port: False)
     monkeypatch.setattr(pipeline_module, "_healthy", lambda port: False)
     monkeypatch.setattr(switcher_module, "_admin_token", lambda: "fake-token")
@@ -104,7 +114,7 @@ def test_start_and_wait_stops_process_on_health_timeout(isolated, monkeypatch):
 
 
 def test_switch_happy_path_registers_pid(isolated):
-    """正常切换：返回新 pid（行为不回归锚点）。用真实存在的版本目录过 jar 检查。"""
+    """正常切换：返回新 pid（行为不回归锚点）。v7/v2 产物目录由 isolated 伪造，过 jar 检查。"""
     isolated.setattr(switcher_module, "_current_version", lambda: "v2")
     isolated.setattr(switcher_module, "_start_and_wait", lambda version: 4321)
     result = switcher_module.switch("v7")

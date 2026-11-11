@@ -50,6 +50,7 @@ function onDocumentClick(event) {
 function menuAction(action) {
   menuOpen.value = false;
   if (action === "profile") ui.openDialog("profile");
+  if (action === "admin") ui.openDialog("admin");
   if (action === "settings") ui.openDialog("settings");
   if (action === "help") ui.openDialog("help");
   if (action === "logout") {
@@ -130,6 +131,9 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocumentClick));
           <div class="menu-sep"></div>
           <button class="menu-item" type="button" role="menuitem" @click="menuAction('profile')">
             <AppIcon name="user" /><span>个人资料</span>
+          </button>
+          <button v-if="auth.isAdmin" class="menu-item" type="button" role="menuitem" @click="menuAction('admin')">
+            <AppIcon name="shield" /><span>账号管理</span>
           </button>
           <button class="menu-item" type="button" role="menuitem" @click="menuAction('settings')">
             <AppIcon name="settings" /><span>设置</span>

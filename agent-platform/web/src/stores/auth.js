@@ -9,6 +9,9 @@ import { api, setToken } from "../lib/http";
 
 const TOKEN_KEY = "token";
 const LLM_ROLES = new Set(["SUPER_ADMIN", "ADMIN"]);
+// 管理员面板的入口角色。平台侧还有一道同样的门（app.py ADMIN_PANEL_ROLES），
+// 真正的能力校验（MANAGE_USER、层级）在产物侧 OperatorContext——前端只管显隐。
+const ADMIN_ROLES = new Set(["SUPER_ADMIN", "ADMIN"]);
 
 export const useAuthStore = defineStore("auth", {
   state: () => ({
@@ -23,6 +26,7 @@ export const useAuthStore = defineStore("auth", {
     roleLabel: (state) => state.me?.roleName || state.me?.roleCode || "成员",
     initial: (state) => (state.me?.username || "U").slice(0, 2).toUpperCase(),
     canEditLlm: (state) => !!state.me && LLM_ROLES.has(state.me.roleCode),
+    isAdmin: (state) => !!state.me && ADMIN_ROLES.has(state.me.roleCode),
   },
 
   actions: {

@@ -11,7 +11,7 @@ let toastSeed = 0;
 export const useUiStore = defineStore("ui", {
   state: () => ({
     toasts: [],
-    dialog: null,        // 'settings' | 'profile' | 'help' | null
+    dialog: null,        // 'settings' | 'profile' | 'admin' | 'help' | null
     sidebarOpen: false,
     confirm: { open: false, title: "", text: "", okText: "确定", resolve: null },
   }),

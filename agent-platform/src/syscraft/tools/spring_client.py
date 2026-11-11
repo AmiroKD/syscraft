@@ -36,7 +36,8 @@ class SpringClient:
         return await self._request("POST", path, payload, token, request_id=request_id)
 
     async def _request(self, method: str, path: str, payload: dict | None,
-                       token: str | None, request_id: str | None = None) -> dict[str, Any]:
+                       token: str | None, request_id: str | None = None,
+                       params: dict | None = None) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -50,7 +51,8 @@ class SpringClient:
             try:
                 async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout,
                                              transport=self._transport) as client:
-                    response = await client.request(method, path, json=payload, headers=headers)
+                    response = await client.request(method, path, json=payload,
+                                                    headers=headers, params=params)
                 break
             except httpx.TimeoutException as error:
                 if request_id is None or attempt + 1 >= attempts:
@@ -123,3 +125,14 @@ class SpringClient:
                                 {"rawText": raw_text, "wantedEntity": wanted_entity},
                                 token, request_id=uuid.uuid4().hex)
         return body["data"]
+
+    async def passthrough(self, method: str, path: str, payload: dict | None, token: str,
+                          params: dict | None = None) -> Any:
+        """管理面板转发（账号/角色/授权）：原样携带调用者自己的令牌。
+
+        平台不解析管理语义、不做权限判断——能力门槛（MANAGE_USER 等）与
+        操作审计都发生在产物侧 OperatorContext / adm_audit，平台只是通道。
+        端点白名单由 app.py 的显式路由保证，这里不接收任意路径。
+        """
+        body = await self._request(method, path, payload, token, params=params)
+        return body.get("data")

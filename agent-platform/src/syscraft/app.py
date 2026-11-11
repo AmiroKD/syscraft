@@ -728,6 +728,133 @@ async def runtime_switch(payload: SwitchRequest, authorization: str | None = Hea
     return envelope(result)
 
 
+# ---- 管理员面板转发（账号 / 角色 / 表级授权）----
+# 权限操作走「带角色校验的专用界面」，不走对话：高危操作的守门人应该是
+# 结构化界面 + 产物侧能力校验，而不是一条会听话的模型链路。
+# 平台只把入口收窄到管理员（两道门的第一道）；真正的能力门槛（MANAGE_USER、
+# 层级不可越权建号）与操作审计都在产物侧 OperatorContext / adm_audit，平台不复制权限模型。
+# 端点显式列出——平台绝不转发任意路径，grant bootstrap 等流水线专用端点不在其中。
+
+ADMIN_PANEL_ROLES = {"SUPER_ADMIN", "ADMIN"}
+
+
+async def _admin_guard(authorization: str | None):
+    """管理员端点的公共前置。返回 (token, None) 或 (None, JSONResponse)。"""
+    token = _bearer(authorization)
+    if token is None:
+        return None, JSONResponse(status_code=401, content=envelope(None, "未提供令牌", 401))
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return None, _error(error)
+    if me is None:
+        return None, JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+    if me.get("roleCode") not in ADMIN_PANEL_ROLES:
+        return None, JSONResponse(status_code=403, content=envelope(None, "仅管理员可访问账号管理", 403))
+    return token, None
+
+
+async def _json_body(request: Request) -> dict | None:
+    """读 JSON 体；字段级校验在产物侧，平台只保证「是个对象」。"""
+    try:
+        body = await request.json()
+    except Exception:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _admin_error(error: SpringError) -> JSONResponse:
+    # 管理接口的 400（密码长度、角色不存在等）是调用方可修复的错误，原样透传
+    # 而不是笼统的 502——前端要拿 msg 提示用户改输入；401/403 语义同既有约定
+    status = error.status if error.status in (400, 401, 403, 404, 409) else 502
+    return JSONResponse(status_code=status, content=envelope(None, error.message, error.code or status))
+
+
+async def _admin_proxy(method: str, path: str, payload: dict | None, token: str,
+                       params: dict | None = None):
+    try:
+        data = await _client.passthrough(method, path, payload, token, params=params)
+    except SpringError as error:
+        return _admin_error(error)
+    return envelope(data)
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request, authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    return await _admin_proxy("GET", "/api/admin/users", None, token,
+                              params=dict(request.query_params))
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(request: Request, authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    payload = await _json_body(request)
+    if payload is None:
+        return JSONResponse(status_code=400, content=envelope(None, "请求体必须是 JSON 对象", 400))
+    return await _admin_proxy("POST", "/api/admin/users", payload, token)
+
+
+@app.patch("/api/admin/users/{user_id}")
+async def admin_update_user(user_id: int, request: Request,
+                            authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    payload = await _json_body(request)
+    if payload is None:
+        return JSONResponse(status_code=400, content=envelope(None, "请求体必须是 JSON 对象", 400))
+    return await _admin_proxy("PATCH", f"/api/admin/users/{user_id}", payload, token)
+
+
+@app.post("/api/admin/users/{user_id}/password")
+async def admin_reset_password(user_id: int, authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    return await _admin_proxy("POST", f"/api/admin/users/{user_id}/password", None, token)
+
+
+@app.get("/api/admin/roles")
+async def admin_list_roles(authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    return await _admin_proxy("GET", "/api/admin/roles", None, token)
+
+
+@app.get("/api/admin/grants")
+async def admin_list_grants(request: Request, authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    return await _admin_proxy("GET", "/api/admin/grants", None, token,
+                              params=dict(request.query_params))
+
+
+@app.post("/api/admin/grants")
+async def admin_create_grant(request: Request, authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    payload = await _json_body(request)
+    if payload is None:
+        return JSONResponse(status_code=400, content=envelope(None, "请求体必须是 JSON 对象", 400))
+    return await _admin_proxy("POST", "/api/admin/grants", payload, token)
+
+
+@app.delete("/api/admin/grants/{grant_id}")
+async def admin_revoke_grant(grant_id: int, authorization: str | None = Header(default=None)):
+    token, denied = await _admin_guard(authorization)
+    if denied:
+        return denied
+    return await _admin_proxy("DELETE", f"/api/admin/grants/{grant_id}", None, token)
+
+
 def _bearer(header: str | None) -> str | None:
     if not header:
         return None

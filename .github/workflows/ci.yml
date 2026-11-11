@@ -23,7 +23,9 @@ jobs:
           --health-interval=5s
           --health-timeout=5s
           --health-retries=20
-          --default-authentication-plugin=mysql_native_password
+        # 不再传 --default-authentication-plugin：service options 只接受 docker create
+        # 的参数，mysqld 旗标会导致 unknown flag 报错；root 用默认 caching_sha2_password，
+        # 由 pymysql + cryptography 完成认证（见 requirements.lock）
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

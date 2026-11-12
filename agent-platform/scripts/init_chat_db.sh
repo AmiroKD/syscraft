@@ -24,7 +24,9 @@ if [ -n "${CHAT_DB_PASSWORD:-}" ]; then
 fi
 
 PWD_CHAT="$(openssl rand -hex 16)"
-mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PWD" 2>/dev/null <<SQL
+# root 口令走 MYSQL_PWD 环境变量而不是 -p 参数：-p 会在进程存活期间对同机
+# 任意用户经 ps 可见，环境变量只有进程自己读得到
+MYSQL_PWD="$MYSQL_ROOT_PWD" mysql -h 127.0.0.1 -u root 2>/dev/null <<SQL
 CREATE DATABASE IF NOT EXISTS ${DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE DATABASE IF NOT EXISTS ${TEST_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${PWD_CHAT}';

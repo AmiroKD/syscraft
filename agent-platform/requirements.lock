@@ -1,3 +1,9 @@
+# 本环境完整锁（2026-11 由 venv 冻结，与 site-packages 逐一核对过）。
+# 两条容易误判的说明：
+# - httpx2 / httpcore2 不是幻觉包：langsmith（langgraph 依赖链）要求 httpx2<3,>=2，
+#   是 httpx 的新一代后继，删掉装不回去；
+# - cryptography 本机 venv 未装，但 CI 的 MySQL 8 用 caching_sha2_password，
+#   pymysql 靠它完成认证（见 .github/workflows/ci.yml 注释），必须保留。
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.16.0

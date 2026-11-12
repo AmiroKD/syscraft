@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +22,14 @@ import javax.sql.DataSource;
 @Configuration
 @MapperScan(basePackages = "com.generated.generated.mapper", sqlSessionFactoryRef = "bizSqlSessionFactory")
 public class BizDataSourceConfig {
+
+    /** 与 AdmDataSourceConfig 同一口径：空口令启动即炸，不做静默重试 */
+    public BizDataSourceConfig(@Value("${spring.datasource.biz.password:}") String bizPassword) {
+        if (bizPassword == null || bizPassword.isBlank()) {
+            throw new IllegalStateException(
+                    "缺少 APP_PWD（biz 库口令为空）：请 set -a 后再 source db.env，拒绝以空口令连接");
+        }
+    }
 
     @Bean
     @ConfigurationProperties("spring.datasource.biz")

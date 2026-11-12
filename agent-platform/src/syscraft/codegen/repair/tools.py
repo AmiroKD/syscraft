@@ -72,8 +72,10 @@ class ToolExec:
     def _resolve(self, action: dict, for_write: bool) -> Path | str:
         raw = str(action.get("path", ""))
         path = (self.root / raw).resolve()
-        # 逃逸检查：../ 与软链都可能跑出版本目录
-        if not str(path).startswith(str(self.root)):
+        # 逃逸检查：../ 与软链都可能跑出版本目录。必须用 is_relative_to 而不是
+        # startswith——字符串前缀匹配会把 .../v10 当成 .../v1 的子目录（v1 与
+        # v10 是兄弟版本，读穿就是跨版本泄露）
+        if not path.is_relative_to(self.root):
             return "路径越出版本目录"
         if for_write:
             if not path.is_relative_to(self.root / "src"):
@@ -161,7 +163,8 @@ class ToolExec:
     def _list_files(self, action: dict) -> dict:
         sub = str(action.get("dir") or "")
         target = (self.root / sub).resolve()
-        if not str(target).startswith(str(self.root)) or not target.is_dir():
+        # 同 _resolve：is_relative_to，防 v1/v10 这类前缀兄弟目录被读穿
+        if not target.is_relative_to(self.root) or not target.is_dir():
             return {"ok": False, "error": "目录不存在或越界", "brief": "list rejected"}
         entries = sorted(p.relative_to(self.root).as_posix() for p in target.iterdir())
         return {"ok": True, "output": "\n".join(entries) or "（空）", "brief": f"list {sub or '.'}"}

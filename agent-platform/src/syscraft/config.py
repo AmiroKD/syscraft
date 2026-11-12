@@ -30,6 +30,11 @@ CHAT_DB_NAME = os.getenv("CHAT_DB_NAME", "chat")
 CHAT_DB_USER = os.getenv("CHAT_DB_USER", "chat")
 CHAT_DB_PASSWORD = os.getenv("CHAT_DB_PASSWORD", "")
 
+# ---- 产物库（biz）连接：流水线建表/迁移用（凭证走 MCP_USER / MCP_PWD）----
+# host/port 进配置而不是硬编码 127.0.0.1:3306——换机器/换端口不该改代码
+BIZ_DB_HOST = os.getenv("BIZ_DB_HOST", CHAT_DB_HOST)
+BIZ_DB_PORT = int(os.getenv("BIZ_DB_PORT", str(CHAT_DB_PORT)))
+
 # ---- LLM 接入（来源 db.env，与数据库凭证同一文件、同一权限）----
 # 没配 LLM_API_KEY 时，对话解析退回规则版 IntentResolver
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")

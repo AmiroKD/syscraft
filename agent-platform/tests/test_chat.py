@@ -101,7 +101,7 @@ def test_delete_flow_previews_and_asks_confirmation():
     sessions = SessionStore()
     service = ChatService(client, RuleBasedIntentResolver(), sessions)
 
-    reply = run(service.handle("删除订单，订单号是SO-1", "tk", "s1"))
+    reply = run(service.handle("删除订单，订单号是SO-1", "tk", "s1", me={"id": 1}))
     assert "将删除「订单」 1 条" in reply.reply
     assert "确认请回复「确认」" in reply.reply
     # 预告用的查询会带上过滤条件
@@ -130,7 +130,7 @@ def test_delete_too_many_is_refused():
 def ready_service(client, session_id="s1", token="tk"):
     sessions = SessionStore()
     service = ChatService(client, RuleBasedIntentResolver(), sessions)
-    run(service.handle("删除订单，订单号是SO-1", token, session_id))
+    run(service.handle("删除订单，订单号是SO-1", token, session_id, me={"id": 1}))
     return service, sessions
 
 
@@ -138,7 +138,7 @@ def test_confirmation_executes_delete_with_token():
     client = FakeClient({"rows": [{"id": 7}], "total": 1, "page": 1, "size": 200, "truncated": False},
                         ticket=ticket("tok-1"))
     service, _ = ready_service(client)
-    reply = run(service.handle("确认", "tk", "s1"))
+    reply = run(service.handle("确认", "tk", "s1", me={"id": 1}))
     assert reply.reply == "已删除 1 条。"
     assert client.calls["delete"] == [("trade_order", [7], "tok-1", "tk")]
 
@@ -147,9 +147,31 @@ def test_confirmation_consumes_pending():
     client = FakeClient({"rows": [{"id": 7}], "total": 1, "page": 1, "size": 200, "truncated": False},
                         ticket=ticket())
     service, sessions = ready_service(client)
-    run(service.handle("确认", "tk", "s1"))
+    run(service.handle("确认", "tk", "s1", me={"id": 1}))
     # 核销后待确认状态必须清掉，否则第二次「确认」会拿旧令牌撞 409
-    assert sessions.pop("s1") is None
+    assert sessions.pop("s1", 1) is None
+
+
+def test_confirmation_requires_same_user():
+    """确认权绑定发起人：session_id 是客户端可传的字符串，不是身份。"""
+    client = FakeClient({"rows": [{"id": 7}], "total": 1, "page": 1, "size": 200, "truncated": False},
+                        ticket=ticket())
+    service, _ = ready_service(client)
+    # 另一个用户带同一个 session_id 回复「确认」：不核销、不泄露细节
+    reply = run(service.handle("确认", "tk", "s1", me={"id": 2}))
+    assert reply.reply == "当前没有待确认的操作。"
+    # 发起人本人仍能正常确认（不匹配的尝试不挤掉真正的待确认状态）
+    reply = run(service.handle("确认", "tk", "s1", me={"id": 1}))
+    assert reply.reply == "已删除 1 条。"
+
+
+def test_confirmation_without_me_is_refused():
+    """app 层忘传 me 不能变成冒用通道：fail-closed。"""
+    client = FakeClient({"rows": [{"id": 7}], "total": 1, "page": 1, "size": 200, "truncated": False},
+                        ticket=ticket())
+    service, _ = ready_service(client)
+    reply = run(service.handle("确认", "tk", "s1"))
+    assert reply.reply == "当前没有待确认的操作。"
 
 
 def test_confirmation_without_pending():
@@ -160,10 +182,11 @@ def test_confirmation_without_pending():
 
 def test_expired_pending_is_treated_as_absent():
     sessions = SessionStore()
-    sessions.put("s1", PendingConfirm(token="t", entity="trade_order", ids=(1,), summary="s",
+    sessions.put("s1", PendingConfirm(user_id=1, token="t", entity="trade_order", ids=(1,),
+                                      summary="s",
                                       expires_at=datetime.now() - timedelta(seconds=1)))
     service = ChatService(FakeClient(), RuleBasedIntentResolver(), sessions)
-    reply = run(service.handle("确认", "tk", "s1"))
+    reply = run(service.handle("确认", "tk", "s1", me={"id": 1}))
     assert reply.reply == "当前没有待确认的操作。"
 
 
@@ -176,7 +199,7 @@ def test_conflict_on_execute_prompts_retry():
         raise SpringError(409, 409, "确认令牌已被使用或已过期")
 
     client.delete = fail_delete
-    reply = run(service.handle("确认", "tk", "s1"))
+    reply = run(service.handle("确认", "tk", "s1", me={"id": 1}))
     assert "确认令牌已失效" in reply.reply
     assert "重新发起" in reply.reply
 
@@ -185,6 +208,6 @@ def test_token_is_passed_through_delete_chain():
     client = FakeClient({"rows": [{"id": 7}], "total": 1, "page": 1, "size": 200, "truncated": False},
                         ticket=ticket("tok-9"))
     service, _ = ready_service(client, "s2", token="tk-ops")
-    run(service.handle("确认", "tk-ops", "s2"))
+    run(service.handle("确认", "tk-ops", "s2", me={"id": 1}))
     assert client.calls["preview"][0][2] == "tk-ops"
     assert client.calls["delete"][0][3] == "tk-ops"

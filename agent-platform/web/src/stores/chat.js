@@ -226,6 +226,12 @@ export const useChatStore = defineStore("chat", {
     },
 
     // ---------------------------------------------------------------- 发送
+    /** 断开本地流连接：登出/重置时调用，避免旧流继续占连接、继续往消息里打事件 */
+    abortStream() {
+      this.abort?.abort();
+      this.abort = null;
+    },
+
     async send(text) {
       const ui = useUiStore();
       if (this.busy) {
@@ -253,6 +259,7 @@ export const useChatStore = defineStore("chat", {
       this.typing = true;
       this.busy = true;
       this.canPause = true;
+      this.abort = new AbortController();
 
       try {
         await openStream({
@@ -261,12 +268,14 @@ export const useChatStore = defineStore("chat", {
           afterSeq: 0,
           resume: false,
           token: useAuthStore().token,
+          signal: this.abort.signal,
           onEvent: (event) => this.applyEvent(event),
           onRetry: (note) => this.addNotice(note, turn),
         });
       } catch (error) {
         this.failStream(error);
       } finally {
+        this.abort = null;
         this.typing = false;
         this.busy = false;
         this.canPause = false;
@@ -347,6 +356,7 @@ export const useChatStore = defineStore("chat", {
       }
       this.addNotice("页面已重新连上，正在继续显示本次回答…", 0);
       this.busy = true;
+      this.abort = new AbortController();
       try {
         await openStream({
           message: "",
@@ -354,6 +364,7 @@ export const useChatStore = defineStore("chat", {
           afterSeq: this.streamLastSeq,
           resume: true,
           token: useAuthStore().token,
+          signal: this.abort.signal,
           onEvent: (event) => this.applyEvent(event),
           onRetry: (note) => this.addNotice(note, 0),
         });
@@ -361,6 +372,7 @@ export const useChatStore = defineStore("chat", {
         this.appendError("恢复连接失败：" + error.message);
         ui.toast("恢复连接失败：" + error.message);
       } finally {
+        this.abort = null;
         this.typing = false;
         this.canPause = false;
         this.busy = false;

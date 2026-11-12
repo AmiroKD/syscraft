@@ -28,14 +28,24 @@ class CaseFailure(Exception):
 
 
 class AcceptanceRunner:
-    def __init__(self, base_url: str, spec: dict, timeout: float = 10.0):
+    def __init__(self, base_url: str, spec: dict, timeout: float = 10.0,
+                 env: dict | None = None):
         self.spec = spec
         self.client = httpx.Client(base_url=base_url, timeout=timeout)
+        # 本次运行的局部凭证（如流水线随机生成的验收口令）：显式传入、用完即弃，
+        # 不写进 os.environ——进程级环境变量会被之后启动的所有子进程继承，是泄漏面
+        self._env = env or {}
         self._tokens: dict[str, str] = {}
         self.run_id = uuid.uuid4().hex[:6]
         # 验收临时数据登记簿（审查 r5 留存项：中途失败无统一清理）：
         # (entity, base, record_id, headers) → 删除成功后销账；回合结束兜底清扫
         self._tracked: list[dict] = []
+
+    def _env_get(self, name: str, default: str | None = None) -> str | None:
+        """凭证解析：局部凭证优先，环境变量兜底（CLI 直跑时没有局部凭证）。"""
+        if name in self._env:
+            return self._env[name]
+        return os.environ.get(name, default)
 
     # ------------------------------------------------------------------ 基础
 
@@ -49,11 +59,11 @@ class AcceptanceRunner:
         if account is None:
             raise CaseFailure(f"验收清单里没有账号 {username}")
         if "usernameRef" in account:
-            username = os.environ.get(account["usernameRef"].split(":", 1)[-1], "")
+            username = self._env_get(account["usernameRef"].split(":", 1)[-1], "")
         env_name = account["passwordRef"].split(":", 1)[-1]
-        password = os.environ.get(env_name)
+        password = self._env_get(env_name)
         if not password:
-            raise CaseFailure(f"缺少环境变量 {env_name}")
+            raise CaseFailure(f"缺少验收凭证 {env_name}")
         response = self.client.post("/api/auth/login", json={"username": username, "password": password})
         body = response.json()
         if body.get("code") != 0:

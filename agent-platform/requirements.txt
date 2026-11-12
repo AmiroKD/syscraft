@@ -1,17 +1,9 @@
-# 平台侧直接依赖（意图声明）。补丁版本由 requirements.lock 锁定，锁文件进版本库。
-# 当前只用到 jinja2 + httpx；其余待对应环节落地时再装，避免现在装一堆用不上的包。
+# 平台侧运行时直接依赖（意图声明）。补丁版本由 requirements.lock 锁定，锁文件进版本库。
+# 只声明 src/ 真正 import 的包——想要但没落地的依赖等用到再加，避免声明与安装环境两张皮。
 fastapi
 uvicorn[standard]
 langgraph
-langgraph-checkpoint-sqlite
-openai
 jinja2
-mcp
 pymysql
 httpx
 pydantic>=2
-python-multipart
-python-docx
-pypdf
-loguru
-pytest

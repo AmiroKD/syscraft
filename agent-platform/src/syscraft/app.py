@@ -27,6 +27,7 @@ from syscraft.agent.graph import MAX_HISTORY_ROWS, BusinessAgent
 from syscraft.conversation.chat import ChatService
 from syscraft.conversation.store import SessionNotFound, SessionStore
 from syscraft.conversation.stream_hub import StreamHub, generation_lock
+from syscraft.errors import user_message
 from syscraft.requirement.intent import RuleBasedIntentResolver
 from syscraft.requirement.llm_resolver import LLMIntentResolver
 from syscraft.requirement.model_catalog import catalog
@@ -62,23 +63,34 @@ _generation = GenerationFlow(_client)
 
 
 class _IdentityCache:
-    """登录时缓存 token→用户。生成期间产物按设计停机，me() 不可用时的身份兑底。
+    """登录时缓存 token→用户。生成期间产物按设计停机，me() 不可用时的身份兜底。
 
-    只兑底「产物不可达」（503）这一种情况；401 等鉴权错误照常抛。
-    平台重启即空——运行也随进程死了，不存在跨重启的重连。"""
+    只兜底「产物不可达」（502/503）这一种情况；401 等鉴权错误照常抛。
+    条目带 TTL：注销/被盗的令牌不能因为缓存就在停机窗口内永久有效。
+    超限逐条驱逐最老条目而不是整体清空——整体清空会把所有在线用户的
+    兜底缓存一起抹掉（与 _LoginThrottle 的教训同源）。平台重启即空。"""
 
-    MAX_KEYS = 5_000  # 防涨：token 缓存无过期语义，超限整体重置（演示语义内足够大）
+    MAX_KEYS = 5_000  # 防涨：超限 LRU 逐条驱逐（演示语义内足够大）
+    TTL_SECONDS = 600
 
     def __init__(self):
-        self._map: dict[str, dict] = {}
+        self._map: "OrderedDict[str, tuple[dict, float]]" = OrderedDict()
 
     def remember(self, token: str, user: dict) -> None:
-        if len(self._map) >= self.MAX_KEYS:
-            self._map.clear()
-        self._map[token] = user
+        self._map[token] = (user, time.time())
+        self._map.move_to_end(token)
+        while len(self._map) > self.MAX_KEYS:
+            self._map.popitem(last=False)
 
     def get(self, token: str) -> dict | None:
-        return self._map.get(token)
+        entry = self._map.get(token)
+        if entry is None:
+            return None
+        user, cached_at = entry
+        if time.time() - cached_at > self.TTL_SECONDS:
+            self._map.pop(token, None)
+            return None
+        return user
 
 
 _identities = _IdentityCache()
@@ -162,11 +174,15 @@ async def index():
 
 
 class _LoginThrottle:
-    """登录失败限速（P1-4）：同名+来源 5 次失败锁 5 分钟。内存态、单机语义内自洽——
+    """登录失败限速（P1-4）：同一来源 5 次失败锁 5 分钟。内存态、单机语义内自洽——
     多实例部署应换集中存储（记入设计边界）。成功登录即清零。
 
-    超限淘汰必须是「逐条 LRU」而不是整体清空：整体清空会把已锁定账号的计数
-    一起抹掉，攻击者用一万个随机用户名各失败一次就能解锁所有人。"""
+    锁定维度是 IP 而不是 username@ip：按用户名维度锁定会变成「账号锁定 DoS」——
+    攻击者换个 IP 对受害者用户名故意失败 5 次，受害者本人在常用 IP 上就被锁。
+    按 IP 锁的代价是攻击者多换几个 IP 就能多试几轮密码，但锁不死任何人。
+
+    超限淘汰必须是「逐条 LRU」而不是整体清空：整体清空会把已锁定来源的计数
+    一起抹掉，攻击者用一万个随机用户名各失败一次就能解锁所有来源。"""
 
     MAX_FAILURES = 5
     LOCK_SECONDS = 300
@@ -176,7 +192,9 @@ class _LoginThrottle:
         self._failures: "OrderedDict[str, list[float]]" = OrderedDict()
 
     def _key(self, username: str, ip: str) -> str:
-        return f"{username}@{ip}"
+        # username 参数保留在签名里（调用点语义不变、也为将来按用户名告警留位），
+        # 但不参与锁定维度——见类注释
+        return ip
 
     def locked(self, username: str, ip: str) -> int | None:
         """返回剩余锁定秒数（None = 未锁定）。只读为主：过期条目顺手清掉。"""
@@ -374,7 +392,14 @@ async def chat(payload: ChatRequest, authorization: str | None = Header(default=
             _hub.finish(session.id)
 
     # ---- 规则版回退（无 LLM，仅开发自测）：消息不落会话，见 chat.py ----
-    reply = await _chat.handle(payload.message, token, payload.session_id)
+    try:
+        me = await _identity(token)
+    except SpringError as error:
+        return _error(error)
+    if me is None:
+        return JSONResponse(status_code=503, content=envelope(None, "产物服务不可达且无法确认身份", 503))
+    # me 必须传：删除确认绑定发起人，不传等于把确认通道敞给任何知道 session_id 的人
+    reply = await _chat.handle(payload.message, token, payload.session_id, me=me)
     table = None
     if reply.table is not None:
         table = {
@@ -502,7 +527,10 @@ async def chat_stream(payload: ChatRequest, authorization: str | None = Header(d
             # 连接就收不到 paused 和 done 两个终态事件了（见 _settle_pause）
             _settle_pause(sid, session, _hub)
         except Exception as error:  # noqa: BLE001 任何异常都要变成流里的事件而不是悬空连接
-            emit({"type": "error", "message": f"处理失败：{error}"})
+            # 未分类异常的字符串可能带路径/SQL 片段，SSE 事件任何登录用户可见——
+            # 已知类型透传，其余收敛，细节留在服务端日志
+            print(f"[chat] dispatch 异常：{error!r}", flush=True)
+            emit({"type": "error", "message": user_message(error)})
         finally:
             # 收殓归 dispatch 生命周期而不是连接生命周期（审查 r5①）：
             # 客户端连接断光也不会留下「running」僵尸卡死会话；
@@ -595,6 +623,9 @@ async def _follow_events(sid: str, session, hub: StreamHub, task, after_seq: int
         for event in events:
             last = event["seq"]
             yield event
+        # 生成流的 dispatch 提前返回后还有事件会来：判定信号是 gen_state 槽位——
+        # 它是会话级信号（别的会话在生成不该拖住本会话的收尾）。槽位读走进程内
+        # 镜像（store.py），轮询不再打库
         gen_running = session.get_slot("gen_state") == "running"
         if task is not None:
             dispatch_done = task.done()
@@ -607,8 +638,11 @@ async def _follow_events(sid: str, session, hub: StreamHub, task, after_seq: int
         if not events:
             await asyncio.sleep(0.15)
 
-    if task is not None and task.done() and task.exception() is not None:
-        yield {"type": "error", "message": str(task.exception())}
+    if task is not None and task.done() and not task.cancelled():
+        error = task.exception()
+        if error is not None:
+            print(f"[chat] dispatch 任务逃逸异常：{error!r}", flush=True)
+            yield {"type": "error", "message": user_message(error)}
     yield {"type": "done", "sessionId": sid}
 
 
@@ -669,7 +703,11 @@ async def rename_session(session_id: str, payload: RenameRequest,
         return _error(error)
     except SessionNotFound:
         return JSONResponse(status_code=404, content=envelope(None, "会话不存在", 404))
-    session.set_title(payload.title)
+    try:
+        session.set_title(payload.title)
+    except Exception as error:  # noqa: BLE001 落库失败给明确反馈，而不是裸 500
+        print(f"[sessions] 重命名失败：{error!r}", flush=True)
+        return JSONResponse(status_code=500, content=envelope(None, "重命名失败，请稍后重试", 500))
     return envelope({"sessionId": session_id, "title": payload.title[:20]})
 
 

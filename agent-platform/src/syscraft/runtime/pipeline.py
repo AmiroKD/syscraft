@@ -124,9 +124,14 @@ class Pipeline:
         ddl_dir = self.root / "workspace/scripts/ddl"
         scripts = sorted(ddl_dir.glob(f"{version}_*.sql"))
         created: list[str] = []
+        # 凭证缺失在流水线入口就报人话，而不是让 pymysql 在深处抛一个
+        # 谁也读不懂的连接错误（MCP_USER/MCP_PWD 是产物库的账号体系）
+        ddl_user, ddl_pwd = os.environ.get("MCP_USER", ""), os.environ.get("MCP_PWD", "")
+        if not ddl_user or not ddl_pwd:
+            raise RuntimeError("缺少产物库凭证：请设置 MCP_USER / MCP_PWD 环境变量后重跑")
         connection = pymysql.connect(
-            host="127.0.0.1", port=3306,
-            user=os.environ.get("MCP_USER", ""), password=os.environ.get("MCP_PWD", ""),
+            host=config.BIZ_DB_HOST, port=config.BIZ_DB_PORT,
+            user=ddl_user, password=ddl_pwd,
             database="biz", charset="utf8mb4",
         )
         applied = 0
@@ -297,10 +302,11 @@ class Pipeline:
         admin_token, admin_id = _spring_session()
 
         # 验收账号走管理接口创建，随机口令只存在内存里；验收完停用（等效删除的权限效果，
-        # 账号行留下反而是审计痕迹；契约没有删除用户端点，见运行时 3.3）
-        os.environ["ACC_USER_PWD"] = _ensure_account(admin_token, "__acc_user__", "USER")
+        # 账号行留下反而是审计痕迹；契约没有删除用户端点，见运行时 3.3）。
+        # 口令以局部凭证传给 runner——写进 os.environ 会被之后启动的所有子进程继承
+        acc_env = {"ACC_USER_PWD": _ensure_account(admin_token, "__acc_user__", "USER")}
         spec = json.loads(spec_path.read_text(encoding="utf-8"))
-        runner = AcceptanceRunner(f"http://127.0.0.1:{self.port}", spec)
+        runner = AcceptanceRunner(f"http://127.0.0.1:{self.port}", spec, env=acc_env)
         try:
             report = runner.run()
         finally:

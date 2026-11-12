@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +23,15 @@ import javax.sql.DataSource;
             sqlSessionFactoryRef = "admSqlSessionFactory")
             // meta 里是能力视图的只读查询（GrantViewMapper），同走 adm 库
 public class AdmDataSourceConfig {
+
+    /** 口令为空启动即炸：db.env 少了 set -a 时会以空口令静默重试，报错出现在
+     * 深处的 SQL 层极难定位（README 踩坑记录在案）——与 SecretBox 对 APP_SECRET 同一口径 */
+    public AdmDataSourceConfig(@Value("${spring.datasource.adm.password:}") String admPassword) {
+        if (admPassword == null || admPassword.isBlank()) {
+            throw new IllegalStateException(
+                    "缺少 APP_PWD（adm 库口令为空）：请 set -a 后再 source db.env，拒绝以空口令连接");
+        }
+    }
 
     @Primary
     @Bean

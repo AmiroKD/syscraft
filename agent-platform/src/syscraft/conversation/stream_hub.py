@@ -18,6 +18,7 @@ done 条目不永久驻留：超上限时从最老的 done 驱起。
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections import deque
 
 MAX_TRACKED_SESSIONS = 100
@@ -26,6 +27,10 @@ MAX_TRACKED_SESSIONS = 100
 class StreamHub:
     def __init__(self):
         self._runs: dict[str, dict] = {}
+        # emit 会从两个线程并发进来：事件循环线程与流水线线程（to_thread 里的
+        # notify 回调）。seq 分配与日志追加必须互斥，否则重号会破坏断线续传的
+        # after_seq 对齐——客户端会漏收或重收事件
+        self._lock = threading.Lock()
 
     # ---- 运行生命周期 ----
 
@@ -34,15 +39,16 @@ class StreamHub:
 
         seq 会话内单调递增、永不清零——重连的 after_seq 才能跨轮对齐；
         事件日志每轮清空，回放范围只限当前轮。"""
-        run = self._runs.get(session_id)
-        if run is not None and run["status"] == "running":
-            return False
-        self._runs[session_id] = {"status": "running",
-                                  "seq": run["seq"] if run else 0,
-                                  "events": deque(),
-                                  "error": None,
-                                  "pause": False,
-                                  "task": None}
+        with self._lock:
+            run = self._runs.get(session_id)
+            if run is not None and run["status"] == "running":
+                return False
+            self._runs[session_id] = {"status": "running",
+                                      "seq": run["seq"] if run else 0,
+                                      "events": deque(),
+                                      "error": None,
+                                      "pause": False,
+                                      "task": None}
         self._sweep()
         return True
 
@@ -61,62 +67,70 @@ class StreamHub:
         return self.status(session_id) == "running"
 
     def emit(self, session_id: str, event: dict) -> int:
-        run = self._runs.get(session_id)
-        if run is None:
-            return 0
-        run["seq"] += 1
-        logged = {"seq": run["seq"], **event}
-        run["events"].append(logged)
-        return run["seq"]
+        with self._lock:
+            run = self._runs.get(session_id)
+            if run is None:
+                return 0
+            run["seq"] += 1
+            logged = {"seq": run["seq"], **event}
+            run["events"].append(logged)
+            return run["seq"]
 
     def finish(self, session_id: str, error: str | None = None) -> None:
-        run = self._runs.get(session_id)
-        if run is not None:
-            run["status"] = "done"
-            run["error"] = error
-            run["task"] = None  # 别握着一个已结束的任务句柄
+        with self._lock:
+            run = self._runs.get(session_id)
+            if run is not None:
+                run["status"] = "done"
+                run["error"] = error
+                run["task"] = None  # 别握着一个已结束的任务句柄
 
     def status(self, session_id: str) -> str | None:
-        run = self._runs.get(session_id)
-        return run["status"] if run else None
+        with self._lock:
+            run = self._runs.get(session_id)
+            return run["status"] if run else None
 
     # ---- 暂停 ----
 
     def attach_task(self, session_id: str, task) -> None:
         """把本轮的 dispatch 任务交给中枢保管。暂停要 cancel 它——
         只有任务句柄能打断正在 await 的 LLM 调用，标志位只能等到下一个边界。"""
-        run = self._runs.get(session_id)
-        if run is not None and run["status"] == "running":
-            run["task"] = task
+        with self._lock:
+            run = self._runs.get(session_id)
+            if run is not None and run["status"] == "running":
+                run["task"] = task
 
     def request_pause(self, session_id: str) -> bool:
         """请求暂停本轮。返回 False 表示没有在跑的运行（或刚结束）。
 
         cancel 之后由 dispatch 的 CancelledError 分支负责落库与补说明——
         收殓写在 dispatch 里而不是这里，是因为只有它知道本轮产出了什么。"""
-        run = self._runs.get(session_id)
-        if run is None or run["status"] != "running":
-            return False
-        run["pause"] = True
-        task = run.get("task")
+        with self._lock:
+            run = self._runs.get(session_id)
+            if run is None or run["status"] != "running":
+                return False
+            run["pause"] = True
+            task = run.get("task")
         if task is not None and not task.done():
             task.cancel()
         return True
 
     def is_paused(self, session_id: str) -> bool:
-        run = self._runs.get(session_id)
-        return bool(run and run["pause"])
+        with self._lock:
+            run = self._runs.get(session_id)
+            return bool(run and run["pause"])
 
     def seq(self, session_id: str) -> int:
         """会话当前的事件序号（跨轮递增）。刷新后的接管要靠它续上缺口。"""
-        run = self._runs.get(session_id)
-        return int(run["seq"]) if run else 0
+        with self._lock:
+            run = self._runs.get(session_id)
+            return int(run["seq"]) if run else 0
 
     def replay(self, session_id: str, after_seq: int = 0) -> list[dict]:
-        run = self._runs.get(session_id)
-        if run is None:
-            return []
-        return [e for e in run["events"] if e["seq"] > after_seq]
+        with self._lock:
+            run = self._runs.get(session_id)
+            if run is None:
+                return []
+            return [e for e in run["events"] if e["seq"] > after_seq]
 
 
 # 全局生成锁（《会话与上下文策略》5 节：全局一把，持有者是 runtime，不是会话）

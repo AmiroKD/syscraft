@@ -147,8 +147,11 @@ class GenerationFlow:
         try:
             result = await asyncio.to_thread(extractor.extract, requirement, answers)
         except Exception as error:  # 模型故障 / 自修正后校验仍不过
+            from syscraft.errors import user_message
             session.set_slot("gen_state", None)
-            reply = f"需求解析失败：{error}"
+            # 已知错误类型透传原文，未分类的收敛成模糊文案——异常字符串
+            # 可能带路径与堆栈摘要，不该进会话历史
+            reply = f"需求解析失败：{user_message(error)}"
             session.append("assistant", "error", {"message": reply})
             return {"reply": reply}
 
@@ -346,7 +349,8 @@ class GenerationFlow:
                 session.append("assistant", "text", reply)
                 emit({"type": "text", "text": reply})
             except Exception as error:  # noqa: BLE001 线程里任何异常都要落到会话里
-                reply = f"生成异常中断：{error}"
+                from syscraft.errors import user_message
+                reply = f"生成异常中断：{user_message(error)}"
                 session.append("assistant", "error", {"message": reply})
                 emit({"type": "error", "message": reply})
             finally:
@@ -356,7 +360,11 @@ class GenerationFlow:
                 session.set_slot("gen_state", None)
                 session.set_slot("gen_mode", None)
 
-        asyncio.create_task(task())
+        pipeline_task = asyncio.create_task(task())
+        # asyncio 只对运行中的 task 持弱引用：不保存句柄，任务可能在运行中被 GC，
+        # finally 里的锁释放与状态清理随之全部丢失（全局锁永久占用，只能重启）
+        self._pipeline_task = pipeline_task
+        pipeline_task.add_done_callback(_log_pipeline_crash)
         return {"reply": reply}
 
     async def _stop_old_product(self, emit: Callable[[dict], None]) -> None:
@@ -370,6 +378,16 @@ class GenerationFlow:
         deadline = time.time() + 15
         while _port_busy(config.SPRING_PORT) and time.time() < deadline:
             await asyncio.sleep(0.5)
+
+
+def _log_pipeline_crash(task: asyncio.Task) -> None:
+    """done 兜底：task() 内部已把异常落进会话，这里只接「finally 清场段本身炸了」
+    的最后一道——静默消失的生成比失败的生成更难排查。"""
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        print(f"[generate] 流水线收尾异常：{error!r}", flush=True)
 
 
 def _next_version() -> str:

@@ -78,9 +78,10 @@ def test_login_throttle_locks_after_failures():
     for _ in range(5):
         throttle.record_failure("alice", "127.0.0.1")
     assert throttle.locked("alice", "127.0.0.1") is not None
-    # 换个来源不受影响（按 用户名@来源 维度）
+    # 锁定维度是来源 IP：同 IP 换用户名刷不出新额度（bob 同样被锁）；
+    # 但换 IP 不受影响——按用户名维度锁会把「账号锁定 DoS」敞给攻击者
+    assert throttle.locked("bob", "127.0.0.1") is not None
     assert throttle.locked("alice", "10.0.0.2") is None
-    assert throttle.locked("bob", "127.0.0.1") is None
     # 成功登录清零
     throttle.clear("alice", "127.0.0.1")
     assert throttle.locked("alice", "127.0.0.1") is None

@@ -63,10 +63,13 @@ class ChatService:
         self._resolver = resolver
         self._sessions = sessions or SessionStore()
 
-    async def handle(self, message: str, token: str, session_id: str | None = None) -> ChatReply:
+    async def handle(self, message: str, token: str, session_id: str | None = None,
+                     me: dict | None = None) -> ChatReply:
+        """me：当前用户（app 层从 _identity 传入）。确认权绑定发起人，fail-closed：
+        me 缺失一律视为没有待确认操作——app 层忘传不能变成冒用通道。"""
         text = normalize(message)
         if text.lower() in CONFIRM_WORDS:
-            pending = self._sessions.pop(session_id)
+            pending = self._sessions.pop(session_id, (me or {}).get("id"))
             if pending is None:
                 return ChatReply("当前没有待确认的操作。")
             return await self._execute_confirm(pending, token)
@@ -77,7 +80,7 @@ class ChatService:
             return ChatReply(reply=str(error))
 
         if intent.op == "DELETE":
-            return await self._begin_delete(intent, token, session_id)
+            return await self._begin_delete(intent, token, session_id, me=me)
         return await self._run_query(intent, token)
 
     async def _run_query(self, intent: Intent, token: str) -> ChatReply:
@@ -89,7 +92,8 @@ class ChatService:
         table = to_table(intent.entity, data)
         return ChatReply(reply=summarize(intent.entity, table), table=table)
 
-    async def _begin_delete(self, intent: Intent, token: str, session_id: str | None) -> ChatReply:
+    async def _begin_delete(self, intent: Intent, token: str, session_id: str | None,
+                            me: dict | None = None) -> ChatReply:
         query = build_query(intent)
         query["size"] = MAX_DELETE_SCAN
         try:
@@ -112,6 +116,7 @@ class ChatService:
             return ChatReply(reply=explain(error, intent.entity))
 
         self._sessions.put(session_id, PendingConfirm(
+            user_id=int((me or {}).get("id") or 0),
             token=ticket["token"],
             entity=intent.entity.entity,
             ids=ids,

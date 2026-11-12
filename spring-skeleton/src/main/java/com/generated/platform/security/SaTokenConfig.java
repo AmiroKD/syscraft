@@ -6,6 +6,7 @@ import cn.dev33.satoken.stp.StpLogic;
 import com.generated.platform.admin.mapper.RequestDedupMapper;
 import com.generated.platform.common.DedupFilter;
 import com.generated.platform.security.SessionService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -32,7 +33,16 @@ public class SaTokenConfig implements WebMvcConfigurer {
     private final PermVersionGuard permVersionGuard;
     private final SessionService sessionService;
 
-    public SaTokenConfig(PermVersionGuard permVersionGuard, SessionService sessionService) {
+    /** JWT 密钥启动期 fail-fast：与 SecretBox 对 APP_SECRET 的口径对齐。
+     * 密钥泄露即等同令牌可伪造，优先级更高——不能等到第一次签发才在深处炸。 */
+    public SaTokenConfig(PermVersionGuard permVersionGuard, SessionService sessionService,
+                         @Value("${sa-token.jwt-secret-key:}") String jwtSecret) {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException("缺少 JWT_SECRET：无签名密钥时令牌可被任意伪造，拒绝启动");
+        }
+        if (jwtSecret.trim().length() < 32) {
+            throw new IllegalStateException("JWT_SECRET 强度不足（至少 32 字符）：短密钥可被暴力枚举");
+        }
         this.permVersionGuard = permVersionGuard;
         this.sessionService = sessionService;
     }

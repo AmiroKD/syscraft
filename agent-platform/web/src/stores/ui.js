@@ -35,6 +35,8 @@ export const useUiStore = defineStore("ui", {
 
     /** 原生确认框的 Promise 版本：调用点写 `if (!await ui.ask(...)) return` */
     ask(title, text, okText = "确定") {
+      // 连续弹框时先把上一个未应答的框按「取消」结算，否则前一个调用方的 Promise 永远悬挂
+      if (this.confirm.resolve) this.answerConfirm(false);
       return new Promise((resolve) => {
         this.confirm = { open: true, title, text, okText, resolve };
       });

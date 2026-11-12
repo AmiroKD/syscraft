@@ -158,7 +158,12 @@ def _save(base_url: str, api_key: str, model: str) -> None:
     try:
         os.chmod(tmp, 0o600)
     except OSError:
-        pass  # Windows/受限文件系统：权限位不可用不阻塞保存
+        # Key 是明文落盘，0600 是唯一防线：POSIX 上收不紧权限就必须回滚报错，
+        # 不能让文件按默认 umask 变成组/全员可读还报告「保存成功」。
+        # Windows 没有这套权限位，降级跳过是唯一合理的语境
+        if os.name != "nt":
+            tmp.unlink(missing_ok=True)
+            raise LlmSettingsError("无法将模型配置收权为仅本人可读（chmod 0600 失败），已取消保存")
     tmp.replace(path)
 
 

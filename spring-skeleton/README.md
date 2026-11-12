@@ -1,13 +1,13 @@
 # spring-skeleton
 
-Java 固定骨架（`platform/` 层），31 个类，手写一次，随每个版本目录整目录复制。
+Java 固定骨架（`platform/` 层），手写一次，随每个版本目录整目录复制。
 
 - 包根：`com.generated.platform`
-- 依赖只有七个：web / validation / actuator / `mybatis-plus-spring-boot3-starter` /
-  `sa-token-spring-boot3-starter` + `sa-token-jwt` / `caffeine` / `mysql-connector-j`
+- 依赖：web / validation / actuator / `mybatis-plus-spring-boot3-starter` /
+  `sa-token-spring-boot3-starter` + `sa-token-jwt` / `caffeine` / `mysql-connector-j`（见 pom.xml，以它为准——这里的数字会过时，类数与依赖数不写死）
 - 业务代码不在这里：`generated/` 由模板渲染，见《代码生成器设计》
 
-类清单见 `../../output/平台骨架接口清单-v1.0.md`。
+类清单见 `../../output/平台骨架接口清单-v1.0.md`（清单有统计日期；本 README 不再维护具体数量，避免文档漂移）。
 
 本目录不参与生成；新增端点需改骨架并升级版本（`代码生成器设计` 10 节已列为局限）。
 

@@ -54,6 +54,7 @@ function menuAction(action) {
   if (action === "settings") ui.openDialog("settings");
   if (action === "help") ui.openDialog("help");
   if (action === "logout") {
+    chat.abortStream();   // 先断流再清状态，避免旧连接继续打事件
     auth.logout();
     chat.newChat({ silent: true });
     chat.sessions = [];

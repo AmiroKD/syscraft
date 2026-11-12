@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 
 @dataclass(frozen=True)
 class PendingConfirm:
+    user_id: int
     token: str
     entity: str
     ids: tuple[int, ...]
@@ -28,7 +29,10 @@ class PendingConfirm:
 
 
 class SessionStore:
-    """key = session_id。单进程足够：平台目前单实例，多实例时换 Redis 再说。"""
+    """key = session_id。单进程足够：平台目前单实例，多实例时换 Redis 再说。
+
+    待确认状态必须绑定发起人：session_id 是客户端可传的字符串，不能当身份用——
+    不绑定的话，B 带上同一个 session_id 回复「确认」就能核销 A 发起的删除。"""
 
     def __init__(self) -> None:
         self._pending: dict[str, PendingConfirm] = {}
@@ -38,13 +42,21 @@ class SessionStore:
         with self._lock:
             self._pending[self._key(session_id)] = pending
 
-    def pop(self, session_id: str | None) -> PendingConfirm | None:
+    def pop(self, session_id: str | None, user_id: int | None) -> PendingConfirm | None:
         """取出并清除。过期的当作不存在——过期满 5 分钟的令牌核销必然 409，
-        与其让用户看到一句数据库味的报错，不如现在就请他重新说一遍。"""
+        与其让用户看到一句数据库味的报错，不如现在就请他重新说一遍。
+
+        user_id 不匹配（或缺失）按不存在处理：不取走、不泄露「这里有一个
+        待确认操作」——否则冒用者能把真正发起人的确认机会挤掉。"""
+        if user_id is None:
+            return None
         key = self._key(session_id)
         with self._lock:
-            pending = self._pending.pop(key, None)
-        if pending is None or pending.expired():
+            pending = self._pending.get(key)
+            if pending is None or pending.user_id != user_id:
+                return None
+            del self._pending[key]
+        if pending.expired():
             return None
         return pending
 

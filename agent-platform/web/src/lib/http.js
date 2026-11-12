@@ -31,7 +31,7 @@ export class HttpError extends Error {
   }
 }
 
-export async function api(method, path, body) {
+export async function api(method, path, body, { timeout = 15000 } = {}) {
   let res;
   try {
     res = await fetch(path, {
@@ -41,8 +41,13 @@ export async function api(method, path, body) {
         ...(token ? { Authorization: "Bearer " + token } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      // 网关挂起时不能让 Promise 永远 pending——调用方的 loading 态会卡死
+      signal: AbortSignal.timeout(timeout),
     });
   } catch (error) {
+    if (error?.name === "TimeoutError") {
+      throw new HttpError("请求超时，请稍后重试", 504);
+    }
     throw new HttpError("网络不可达，请检查服务是否在运行", 0);
   }
 
@@ -54,7 +59,7 @@ export async function api(method, path, body) {
   }
 
   if (res.status === 401) {
-    onUnauthorized?.();
+    unauthorized?.();
     throw new HttpError(data.msg || "登录状态已失效，请重新登录", 401, data.code);
   }
   if (!res.ok || data.code !== 0) {

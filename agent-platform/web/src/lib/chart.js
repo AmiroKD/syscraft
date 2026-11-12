@@ -38,6 +38,16 @@ function byKey(columns, keys) {
   return keys.map((key) => columns.find(( column) => column.key === key)).filter(Boolean);
 }
 
+/** tooltip 按 HTML 渲染，分组值来自业务数据，必须转义后再拼 */
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 /**
  * 从表格推断图表模型；不可画时返回 null。
  * @param {object} table {columns, rows, chart?}
@@ -197,7 +207,7 @@ export function buildChartOption(model, type, theme) {
         backgroundColor: theme.surface,
         borderColor: theme.line,
         textStyle: { color: theme.ink, fontSize: 12 },
-        formatter: (item) => `${item.name}<br/><b>${formatNumber(item.value)}</b> · ${item.percent}%`,
+        formatter: (item) => `${escapeHtml(item.name)}<br/><b>${formatNumber(item.value)}</b> · ${item.percent}%`,
       },
       legend: {
         type: "scroll",

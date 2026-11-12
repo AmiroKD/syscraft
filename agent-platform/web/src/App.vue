@@ -11,6 +11,7 @@ import AppSidebar from "./components/AppSidebar.vue";
 import ChatView from "./components/ChatView.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import ProfileDialog from "./components/ProfileDialog.vue";
+import AdminDialog from "./components/AdminDialog.vue";
 import HelpDialog from "./components/HelpDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ToastHost from "./components/ToastHost.vue";
@@ -34,6 +35,7 @@ onMounted(async () => {
 
   // 401 只有一条出口：清状态回登录页。不做静默刷新——那会掩盖「权限已被改动」
   onUnauthorized(() => {
+    chat.abortStream();
     auth.logout();
     chat.newChat({ silent: true });
     chat.sessions = [];
@@ -70,6 +72,7 @@ onMounted(async () => {
 
   <SettingsDialog />
   <ProfileDialog />
+  <AdminDialog />
   <HelpDialog />
   <ConfirmDialog />
   <ToastHost />

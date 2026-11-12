@@ -1,0 +1,5 @@
+# 开发/测试依赖（意图声明）。CI 与本地跑 pytest 用：
+#   pip install -r requirements.lock   （已含下列全部，推荐）
+#   或 pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+pytest

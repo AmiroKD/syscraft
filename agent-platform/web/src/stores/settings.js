@@ -3,8 +3,8 @@
  *
  * 两条边界：
  * - 界面设置（主题/字号/工具轨迹/发送键）只存本机 localStorage，不上服务端；
- * - 模型配置另存一份到 localStorage 作为「本浏览器上次填的」，服务端只回
- *   「平台是否已配置」的布尔值，不回传 Key。
+ * - 模型配置另存一份到 sessionStorage 作为「本会话上次填的」（Key 敏感度与
+ *   token 同级，不落长期存储）；服务端只回「平台是否已配置」的布尔值，不回传 Key。
  */
 import { defineStore } from "pinia";
 import { api } from "../lib/http";
@@ -35,7 +35,8 @@ function loadSettings() {
 
 function loadLlm() {
   try {
-    const raw = JSON.parse(localStorage.getItem(LLM_KEY) || "{}");
+    // Key 与 token 同生命周期：存 sessionStorage，随标签页关闭即清，不落长期存储
+    const raw = JSON.parse(sessionStorage.getItem(LLM_KEY) || "{}");
     return {
       baseUrl: typeof raw.baseUrl === "string" ? raw.baseUrl : "",
       apiKey: typeof raw.apiKey === "string" ? raw.apiKey : "",
@@ -127,10 +128,10 @@ export const useSettingsStore = defineStore("settings", {
       try {
         await api("PUT", "/api/settings/llm", payload);
         try {
-          localStorage.setItem(LLM_KEY, JSON.stringify(payload));
+          sessionStorage.setItem(LLM_KEY, JSON.stringify(payload));
         } catch (e) { /* 忽略 */ }
         this.serverConfigured = true;
-        this.llmStatus = { text: "已保存并应用到平台，同时缓存到当前浏览器", tone: "ok" };
+        this.llmStatus = { text: "已保存并应用到平台，本浏览器本次会话内有效", tone: "ok" };
         return true;
       } catch (error) {
         this.llmStatus = { text: "保存失败：" + error.message, tone: "fail" };
@@ -154,7 +155,7 @@ export const useSettingsStore = defineStore("settings", {
       this.llmBusy = true;
       this.llmStatus = { text: "连接中…最长等待 45 秒", tone: "" };
       try {
-        const result = await api("POST", "/api/settings/llm/test", payload);
+        const result = await api("POST", "/api/settings/llm/test", payload, { timeout: 45000 });
         this.llmStatus = {
           text: result.message || (result.ok ? "连接成功" : "连接失败"),
           tone: result.ok ? "ok" : "fail",
@@ -168,7 +169,7 @@ export const useSettingsStore = defineStore("settings", {
 
     clearLlmCache() {
       try {
-        localStorage.removeItem(LLM_KEY);
+        sessionStorage.removeItem(LLM_KEY);
       } catch (e) { /* 忽略 */ }
       this.llm = { baseUrl: "", apiKey: "", model: "" };
       this.llmStatus = {

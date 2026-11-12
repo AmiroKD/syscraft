@@ -85,6 +85,12 @@ def _now() -> datetime:
     return datetime.now().replace(microsecond=0)
 
 
+# gen_state（生成状态槽位）的进程内镜像：SSE 跟随循环每 0.15s 轮询它，
+# 不能把每条连接的轮询都变成一次 MySQL 查询。写穿透 + 读回填，
+# 进程生命周期内镜像即真相（重启后流水线已死，槽位残值由 handle() 复位）
+_GEN_STATE_MEM: dict[str, Any] = {}
+
+
 def _iso(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -169,13 +175,28 @@ class Session:
     # ---- 槽位（含待确认状态）----
 
     def get_slot(self, name: str) -> Any:
+        # gen_state 走进程内镜像：SSE 跟随循环每 0.15s 读它一次，直查库会把
+        # 每条连接的轮询都压到 MySQL 上（DB 一抖动整个事件循环跟着冻结）。
+        # 镜像即真相——生成状态本来就只在本进程有意义
+        if name == "gen_state" and self._id in _GEN_STATE_MEM:
+            return _GEN_STATE_MEM[self._id]
         with self._store._cursor() as cur:
             cur.execute("SELECT value FROM chat_slot WHERE session_id = %s AND name = %s",
                         (self._id, name))
             row = cur.fetchone()
-        return json.loads(row["value"]) if row else None
+        value = json.loads(row["value"]) if row else None
+        if name == "gen_state":
+            _GEN_STATE_MEM[self._id] = value   # 读回填：之后都走内存
+        return value
 
     def set_slot(self, name: str, value: Any) -> None:
+        if name == "gen_state":
+            # 写穿透：先更镜像再落库。置位要立即生效（跟随循环马上要看）；
+            # 清空早一两百毫秒无危害——尾部事件在 hub 日志里，不依赖这个槽位
+            if value is None:
+                _GEN_STATE_MEM.pop(self._id, None)
+            else:
+                _GEN_STATE_MEM[self._id] = value
         if value is None:
             with self._store._cursor() as cur:
                 cur.execute("DELETE FROM chat_slot WHERE session_id = %s AND name = %s",
@@ -275,6 +296,7 @@ class SessionStore:
     def delete(self, session_id: str, user_id: int) -> None:
         """删除会话：消息与槽位靠外键级联删除，不留副本。"""
         self.open(session_id, user_id)
+        _GEN_STATE_MEM.pop(session_id, None)   # 镜像与库一起清，别给已删会话留状态
         with self._cursor() as cur:
             cur.execute("DELETE FROM chat_session WHERE id = %s AND user_id = %s",
                         (session_id, user_id))

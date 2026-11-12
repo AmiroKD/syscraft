@@ -30,9 +30,11 @@ echo "== 2/4 产物健康 =="
 curl -fsS -m 5 "$SPRING/actuator/health" > /dev/null && pass "$SPRING/actuator/health" || fail "产物不可达"
 
 echo "== 3/4 登录与在线版本 =="
+# 请求体交给 python3 json.dumps 生成：手工拼 JSON 会在值带引号/反斜杠时变语义
+BODY=$(python3 -c 'import json,sys; print(json.dumps({"username": sys.argv[1], "password": sys.argv[2]}))' \
+  "$ADMIN_USER" "$ADMIN_INIT_PWD")
 TOKEN=$(curl -fsS -m 5 -X POST "$BASE/api/auth/login" \
-  -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_INIT_PWD\"}" \
+  -H 'Content-Type: application/json' -d "$BODY" \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("data",{}).get("token",""))')
 [ -n "$TOKEN" ] || fail "登录失败（口令已改？）"
 pass "登录成功"
@@ -43,9 +45,10 @@ VERSIONS=$(curl -fsS -m 5 "$BASE/api/runtime/versions" -H "Authorization: Bearer
 pass "在线版本清单：$VERSIONS"
 
 echo "== 4/4 只读查询：$QUESTION =="
+BODY=$(python3 -c 'import json,sys; print(json.dumps({"message": sys.argv[1]}))' "$QUESTION")
 ANSWER=$(curl -fsS -m 60 -X POST "$BASE/api/chat" \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d "{\"message\":\"$QUESTION\"}" \
+  -d "$BODY" \
   | python3 -c 'import sys,json; d=json.load(sys.stdin); print((d.get("data") or {}).get("reply") or d.get("msg"))')
 [ -n "$ANSWER" ] || fail "查询没有返回内容"
 pass "回复：$ANSWER"

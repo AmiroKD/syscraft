@@ -27,18 +27,17 @@ def seed(rows: int) -> None:
     try:
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM trade_order WHERE order_no LIKE 'PERF-%'")
-            batch = []
-            for i in range(rows):
-                batch.append(
-                    f"('PERF-{i:06d}', '压测客户{i % 97}', {i % 9 + 1}, {i % 500 + 1}.00, "
-                    f"{(i % 9 + 1) * (i % 500 + 1)}.00, '{'CREATED' if i % 2 else 'PAID'}', "
-                    f"'2026-11-09 12:00:00')")
-            # 500 行一批的多值插入：1 万行 20 条语句，秒级完成
-            for start in range(0, rows, 500):
-                chunk = batch[start:start + 500]
-                cursor.execute(
-                    "INSERT INTO trade_order (order_no, customer, qty, price, amount, status, created_at) "
-                    "VALUES " + ",".join(chunk))
+            # executemany + 占位符：内部值当前虽全可控，但 f-string 拼 VALUES
+            # 是个坏示范——脚本被改成接收外部输入的那天就是注入点
+            batch = [
+                (f"PERF-{i:06d}", f"压测客户{i % 97}", i % 9 + 1, f"{i % 500 + 1}.00",
+                 f"{(i % 9 + 1) * (i % 500 + 1)}.00", "CREATED" if i % 2 else "PAID",
+                 "2026-11-09 12:00:00")
+                for i in range(rows)
+            ]
+            cursor.executemany(
+                "INSERT INTO trade_order (order_no, customer, qty, price, amount, status, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)", batch)
         connection.commit()
     finally:
         connection.close()

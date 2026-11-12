@@ -59,10 +59,25 @@ export async function openStream(opts) {
       throw new HttpError(body.msg || `请求失败 (${res.status})`, res.status, body.code);
     }
 
-    const result = await readBody(res, (event) => {
-      if (typeof event.seq === "number" && event.seq > afterSeq) afterSeq = event.seq;
-      onEvent(event);
-    });
+    // readBody 必须包进 try：流传输中途断网时 reader.read() 会 reject，
+    // 不兜住的话异常直接穿透整个续传循环
+    let result;
+    try {
+      result = await readBody(res, (event) => {
+        if (typeof event.seq === "number" && event.seq > afterSeq) afterSeq = event.seq;
+        onEvent(event);
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") return { aborted: true, lastSeq: afterSeq };
+      // 流中途断开：与「干净结束但没收到 done」同一处理——带序号续传，最多三次
+      attempt += 1;
+      if (attempt > 3) {
+        throw new HttpError("连接中断且续传失败，请刷新页面查看历史", 0);
+      }
+      onRetry?.("连接中断，正在续传…");
+      await sleep(600);
+      continue;
+    }
 
     if (result.done) return { aborted: false, lastSeq: afterSeq };
     // 连接被对端关掉但没收到 done：带序号续传，最多三次

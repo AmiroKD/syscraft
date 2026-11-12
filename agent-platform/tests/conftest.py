@@ -35,8 +35,12 @@ def _clean_chat_schema():
             for table in ("chat_message", "chat_slot", "chat_session"):
                 cur.execute(f"TRUNCATE TABLE {table}")
             cur.execute("SET FOREIGN_KEY_CHECKS = 1")
-    except Exception:  # noqa: BLE001 库不可达不在这里拦，交给具体用例暴露
-        pass
+    except Exception as error:  # noqa: BLE001 库不可达不在这里拦，交给具体用例暴露
+        # 但必须留一句人话：否则表还没建时，前面的用例会以莫名的业务错误失败，
+        # 现场排查半天才发现是忘了跑 init_chat_db.sh
+        print(f"\n[conftest] chat_test 库不可用（{error.__class__.__name__}）："
+              "纯单测继续，碰库的用例会失败。 remediation：source ~/.adaptive/db.env 后 "
+              "运行 ./scripts/init_chat_db.sh", flush=True)
     yield
 
 

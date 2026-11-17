@@ -21,3 +21,33 @@ def test_pure_date_table_returns_none():
 def test_text_first_still_works():
     sample = {"device_name": "TdeviceNa", "purchase_date": "2026-11-09"}
     assert pick_updatable_field(sample) == "device_name"
+
+
+# ---------------- 生成器侧 updatableField 标注（S6 短列溢出的根因修复） ----------------
+
+from syscraft.codegen.generator import updatable_field
+
+
+def test_prefers_long_varchar_over_short():
+    entity = {"fields": [
+        {"column": "shift", "property": "shift", "type": "VARCHAR", "length": 8},
+        {"column": "remark", "property": "remark", "type": "VARCHAR", "length": 191},
+    ]}
+    # shift 样本 "Tshift"(6)+4=10 > 8 不安全；remark "Tremark"(7)+4=11 <= 191
+    assert updatable_field(entity) == "remark"
+
+
+def test_text_beats_long_varchar():
+    entity = {"fields": [
+        {"column": "remark", "property": "remark", "type": "VARCHAR", "length": 191},
+        {"column": "desc", "property": "desc", "type": "TEXT"},
+    ]}
+    assert updatable_field(entity) == "desc"
+
+
+def test_all_short_returns_none():
+    entity = {"fields": [
+        {"column": "shift", "property": "shift", "type": "VARCHAR", "length": 8},
+        {"column": "duty_date", "property": "dutyDate", "type": "DATE"},
+    ]}
+    assert updatable_field(entity) is None

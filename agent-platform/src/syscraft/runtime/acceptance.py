@@ -221,11 +221,10 @@ class AcceptanceRunner:
             raise CaseFailure("新增后按主键查不到", expected=1, actual=len(rows))
 
         # 改一个字符串字段再查回，验证「改」真的落库。
-        # 日期/时间列在 sample 里也是字符串（模板没有类型标注），追加 -upd 会被
-        # 产物正确拒绝（非法日期 400）——S5/S6 首个文本字段是日期时曾误判 FAIL。
-        # 所以按值形如 ISO 日期的跳过；纯日期表没有可安全追加后缀的列，
-        # 就只验增删查（此时「改」已由其他实体的 crud 用例覆盖）。
-        changed_field = pick_updatable_field(sample)
+        # 优先用生成器标注的 updatableField（生成器掌握列类型与长度，能避开
+        # 日期列与短列——S5/S6 曾两次因验收器盲选误判合法产物 FAIL）；
+        # 历史模板无标注时回退到按样本值启发式挑选（跳过日期样式值）。
+        changed_field = check.get("updatableField") or pick_updatable_field(sample)
         if changed_field:
             updated = dict(sample)
             updated["id"] = record_id

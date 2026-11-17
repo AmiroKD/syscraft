@@ -419,6 +419,7 @@ def build_acceptance(model: dict, written: dict[str, list[str]]) -> dict:
             "suspects": [f"src/main/java/com/generated/generated/service/{entity['class_name']}Service.java"],
             "check": {"type": "crud", "base": base, "entity": entity["entity"],
                       "account": "__acc_admin__",
+                      "updatableField": updatable_field(entity),
                       "sample": {f["column"]: sample_value(f) for f in entity["fields"] if not f.get("primary_key")}},
         })
 
@@ -477,6 +478,28 @@ def sample_value(field: dict):
     if model_type == "DATE":
         return "2026-11-09"
     return None
+
+
+def updatable_field(entity: dict) -> str | None:
+    """crud 更新往返的安全字段：文本列且「样本值 + 4 字符后缀」不超列长。
+
+    生成器是唯一同时掌握列类型与长度的地方——验收器只有无类型标注的
+    样本，自己挑字段曾两次误判合法产物（日期列拒绝非法值、短列拒绝超长值，
+    均为产物正确行为）。在此标注，验收器优先消费；历史模板无此键时回退。
+    """
+    best, best_cap = None, -1
+    for f in entity["fields"]:
+        if f.get("primary_key") or f["type"] not in ("VARCHAR", "TEXT"):
+            continue
+        sv = sample_value(f)
+        if not isinstance(sv, str):
+            continue
+        cap = f.get("length") or 10**9  # TEXT 无限长
+        if len(sv) + 4 > cap:
+            continue
+        if cap > best_cap:
+            best, best_cap = f["column"], cap
+    return best
 
 
 def main(argv: list[str] | None = None) -> int:

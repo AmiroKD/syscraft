@@ -10,12 +10,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+
+# ISO 日期/日期时间样式的样本值（模板无类型标注，日期列在 sample 里也是字符串）。
+# 这类列不能追加 -upd 后缀——产物拒绝非法日期是正确行为，不该被判 FAIL。
+_DATE_LIKE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def pick_updatable_field(sample: dict) -> str | None:
+    """从验收样本里挑一个可安全追加 -upd 后缀的字段：字符串且不是日期样式。
+    返回 None 表示整表没有这样的列（纯日期表），crud 用例跳过「改」子步骤。"""
+    return next((k for k, v in sample.items()
+                 if isinstance(v, str) and not _DATE_LIKE.match(v)), None)
 
 
 class CaseFailure(Exception):
@@ -208,8 +220,12 @@ class AcceptanceRunner:
         if len(rows) != 1:
             raise CaseFailure("新增后按主键查不到", expected=1, actual=len(rows))
 
-        # 改一个字符串字段再查回，验证「改」真的落库
-        changed_field = next((k for k, v in sample.items() if isinstance(v, str)), None)
+        # 改一个字符串字段再查回，验证「改」真的落库。
+        # 日期/时间列在 sample 里也是字符串（模板没有类型标注），追加 -upd 会被
+        # 产物正确拒绝（非法日期 400）——S5/S6 首个文本字段是日期时曾误判 FAIL。
+        # 所以按值形如 ISO 日期的跳过；纯日期表没有可安全追加后缀的列，
+        # 就只验增删查（此时「改」已由其他实体的 crud 用例覆盖）。
+        changed_field = pick_updatable_field(sample)
         if changed_field:
             updated = dict(sample)
             updated["id"] = record_id

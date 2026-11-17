@@ -50,3 +50,55 @@ def test_me_when_artifact_offline_is_503(client, monkeypatch):
     monkeypatch.setattr(app_module._client, "me", offline)
     response = client.get("/api/auth/me", headers={"Authorization": "Bearer unknown"})
     assert response.status_code == 503
+
+
+# ---------------- 降级登录：产物不可达时的认证死锁出口（D3） ----------------
+
+def test_platform_fallback_login_when_artifact_down(client, monkeypatch):
+    """产物 503 + 超管环境凭证 → 签发 platform 降级会话。"""
+    monkeypatch.setenv("ADMIN_USER", "boss")
+    monkeypatch.setenv("ADMIN_INIT_PWD", "secret-x")
+
+    async def offline_login(username: str, password: str) -> dict:
+        raise SpringError(503, None, "产物服务不可达")
+
+    monkeypatch.setattr(app_module._client, "login", offline_login)
+    response = client.post("/api/auth/login",
+                           json={"username": "boss", "password": "secret-x"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"]["token"].startswith("platform.")
+    assert body["data"]["user"]["roleCode"] == "SUPER_ADMIN"
+    assert body["data"]["platformFallback"] is True
+    # 降级令牌在 /api/auth/me 也可解析（走缓存）
+    me = client.get("/api/auth/me", headers={"Authorization": "Bearer " + body["data"]["token"]})
+    assert me.json()["data"]["username"] == "boss"
+
+
+def test_platform_fallback_rejects_wrong_password(client, monkeypatch):
+    """降级只认环境凭证一对：密码错走正常失败路径（计入限流）。"""
+    monkeypatch.setenv("ADMIN_USER", "boss")
+    monkeypatch.setenv("ADMIN_INIT_PWD", "secret-x")
+
+    async def offline_login(username: str, password: str) -> dict:
+        raise SpringError(503, None, "产物服务不可达")
+
+    monkeypatch.setattr(app_module._client, "login", offline_login)
+    response = client.post("/api/auth/login",
+                           json={"username": "boss", "password": "wrong"})
+    assert response.json()["code"] != 0
+
+
+def test_platform_fallback_not_for_auth_failures(client, monkeypatch):
+    """产物在线但密码错（401）不降级——那不是「不可达」，是正常失败。"""
+    monkeypatch.setenv("ADMIN_USER", "boss")
+    monkeypatch.setenv("ADMIN_INIT_PWD", "secret-x")
+
+    async def bad_login(username: str, password: str) -> dict:
+        raise SpringError(401, None, "用户名或密码错误")
+
+    monkeypatch.setattr(app_module._client, "login", bad_login)
+    response = client.post("/api/auth/login",
+                           json={"username": "boss", "password": "secret-x"})
+    assert response.json()["code"] != 0

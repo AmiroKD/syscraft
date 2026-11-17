@@ -112,6 +112,15 @@ def _switch_locked(version: str) -> dict:
     return {"version": version, "pid": pid}
 
 
+def adopt_started_process() -> None:
+    """登记 _start_and_wait 刚起的进程为当前产物。
+
+    供 pipeline 的回滚兜底使用：绕过 switch 直接拉起旧 jar 后，平台需要
+    知道这个进程才能在下次停旧/切换时正确终止它。"""
+    global _jar_process
+    _jar_process = _started_process
+
+
 _started_process: subprocess.Popen | None = None
 
 

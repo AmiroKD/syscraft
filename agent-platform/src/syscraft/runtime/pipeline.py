@@ -404,6 +404,10 @@ class Pipeline:
                 if previous_version and previous_version != version:
                     self._rollback(previous_version, result)
 
+        # steps 在 finally 之后取最终态：⑧ 回滚步骤发生在 except 构造 summary
+        # 之后，此前被吞在 result 里不落报告——失败排查无据（实测发现 D3）
+        summary["steps"] = [s.__dict__ for s in result.steps]
+
         report_path = self.root / "workspace/logs" / f"pipeline-{version}.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -411,14 +415,30 @@ class Pipeline:
         return result
 
     def _rollback(self, version: str, result: PipelineResult) -> None:
-        """失败/取消出口：把生成前的版本重新拉起。回滚失败不吞报告，明示人工介入。"""
+        """失败/取消出口：把生成前的版本重新拉起。回滚失败不吞报告，明示人工介入。
+
+        兜底直拉：switch 失败时绕过状态读取与令牌登记直接起旧 jar——此刻
+        产物往往已死，而登录依赖产物认证（D3 认证死锁），管理员连 switch
+        接口都无法调用，「POST /api/runtime/switch」的人工指引形同虚设；
+        直接起进程仍可能把平台救回来。"""
         from syscraft.runtime import switcher as version_switcher
         try:
             version_switcher.switch(version)
             result.record("⑧ 回滚旧版本", True, f"已恢复运行 {version}")
         except version_switcher.SwitchError as error:
-            result.record("⑧ 回滚旧版本", False,
-                          f"{error}；需人工介入：POST /api/runtime/switch 到 {version}")
+            try:
+                pid = version_switcher._start_and_wait(version)
+                version_switcher.adopt_started_process()
+                result.record("⑧ 回滚旧版本", True,
+                              f"switch 失败（{error}），已绕过切换直接拉起 {version}（pid {pid}）")
+                print(f"[pipeline] 回滚兜底：switch 失败后直接拉起 {version} 成功", flush=True)
+            except Exception as fallback_error:
+                result.record("⑧ 回滚旧版本", False,
+                              f"{error}；直接拉起也失败（{fallback_error}）；"
+                              f"需人工介入：手工执行 java -jar workspace/versions/{version}/target/"
+                              f"syscraft-skeleton-0.1.0.jar --server.port={self.port}，"
+                              f"或产物恢复后用平台降级登录执行 POST /api/runtime/switch")
+                print(f"[pipeline] 回滚失败：{version} 未恢复，需人工介入", flush=True)
 
     def _check_cancel(self) -> None:
         if self._should_cancel and self._should_cancel():

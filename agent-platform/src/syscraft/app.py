@@ -98,6 +98,10 @@ _identities = _IdentityCache()
 
 async def _identity(token: str) -> dict | None:
     """当前用户；产物停机时回退登录缓存，两者都没有则 None。"""
+    if token.startswith("platform."):
+        # 平台降级会话（D3 认证死锁出口）：产物对它必然 401，不该去问产物。
+        # 只认缓存（带 TTL），过期即失效——降级会话的寿命由平台自己管。
+        return _identities.get(token)
     try:
         user = await _client.me(token)
         _identities.remember(token, user)
@@ -240,11 +244,46 @@ async def login(payload: LoginRequest, request: Request):
     try:
         data = await _client.login(payload.username, payload.password)
     except SpringError as error:
+        fallback = _platform_fallback_login(payload, error)
+        if fallback is not None:
+            _throttle.clear(payload.username, ip)
+            return envelope(fallback)
         _throttle.record_failure(payload.username, ip)
         return _error(error)
     _throttle.clear(payload.username, ip)
     _identities.remember(data["token"], data["user"])
     return envelope(data)
+
+
+def _platform_fallback_login(payload: LoginRequest, error: SpringError) -> dict | None:
+    """产物不可达时的超管降级登录——破「认证死锁」（实测发现 D3）。
+
+    场景：生成失败回滚未能恢复产物时，登录因依赖产物认证而一并不可用，
+    管理员连 switch 恢复接口都无法调用，只能人工 java -jar。平台本就持有
+    启动产物的管理员环境凭证（switcher 自登录用同一对），在此校验后签发
+    platform 前缀的降级会话：足以执行版本切换等平台操作；业务数据操作
+    仍需产物在线，不可达时如实报错。仅认超管一对凭证；401 等鉴权失败
+    不降级（那说明产物在线且密码错，是正常失败）。限流照常生效。
+    """
+    import hmac as _hmac
+    import os as _os
+    import uuid as _uuid
+
+    if error.status not in (502, 503):
+        return None
+    admin_user = _os.environ.get("ADMIN_USER", "")
+    admin_pwd = _os.environ.get("ADMIN_INIT_PWD", "")
+    if not admin_user or not admin_pwd:
+        return None
+    user_ok = _hmac.compare_digest(payload.username.encode(), admin_user.encode())
+    pwd_ok = _hmac.compare_digest(payload.password.encode(), admin_pwd.encode())
+    if not (user_ok and pwd_ok):
+        return None
+    token = f"platform.{_uuid.uuid4().hex}"
+    user = {"id": 0, "username": admin_user, "roleCode": "SUPER_ADMIN",
+            "displayName": "超级管理员（平台降级会话）"}
+    _identities.remember(token, user)
+    return {"token": token, "user": user, "platformFallback": True}
 
 
 @app.get("/api/auth/me")

@@ -103,6 +103,15 @@ def parse_amend(message: str, catalog: ModelCatalog) -> AmendRequest | None:
               or catalog.by_mention(entity_text)
               or catalog.by_mention(text))
     if entity is None:
+        # 口语别名回退：用户说「订单」而实体显示名是「客户订单」。by_mention
+        # 只认「显示名 ⊆ 用户话」方向，反向包含（显示名包含用户词）在此补上；
+        # 命中多个不猜——「给管理加字段」这类歧义宁可回落业务模式问清楚，
+        # 也不把结构变更打到猜出来的表上（防误伤优先）。
+        hits = [i for i in catalog.all()
+                if len(entity_text) >= 2 and entity_text in (i.display_name or "")]
+        if len(hits) == 1:
+            entity = hits[0]
+    if entity is None:
         return None
     field_text = _clean_field(match.group("field"))
     if not field_text:

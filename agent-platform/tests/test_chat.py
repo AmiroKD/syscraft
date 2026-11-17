@@ -10,7 +10,21 @@ import pytest
 from syscraft.conversation.chat import ChatService, build_query
 from syscraft.conversation.session import PendingConfirm, SessionStore
 from syscraft.requirement.intent import RuleBasedIntentResolver
+from syscraft.requirement.model_catalog import EntityInfo, FieldInfo, ModelCatalog
 from syscraft.tools.spring_client import SpringError
+
+
+def _fixed_resolver() -> RuleBasedIntentResolver:
+    """固定目录注入：用例验证的是规则与编排，不依赖当时在线哪个版本。"""
+    return RuleBasedIntentResolver(catalog=ModelCatalog({
+        "trade_order": EntityInfo(
+            entity="trade_order", display_name="订单",
+            fields=(FieldInfo(column="id", property="id", semantic="主键", type="BIGINT"),
+                    FieldInfo(column="order_no", property="orderNo", semantic="订单号", type="VARCHAR"),
+                    FieldInfo(column="status", property="status", semantic="状态", type="VARCHAR"),
+                    FieldInfo(column="created_at", property="createdAt", semantic="创建时间", type="DATETIME")),
+        ),
+    }))
 
 
 def run(coro):
@@ -56,7 +70,7 @@ def ticket(token="tok-1", impact=1):
 # ------------------------------------------------------------------ 查询
 
 def test_build_query_shape():
-    resolver = RuleBasedIntentResolver()
+    resolver = _fixed_resolver()
     intent = resolver.resolve("查订单 状态是CREATED 前5条")
     query = build_query(intent)
     assert query["filter"] == {"op": "AND", "conditions": [
@@ -69,7 +83,7 @@ def test_reply_reports_total_and_sum():
     payload = {"rows": [{"id": 1, "order_no": "SO-1", "amount": 100.0},
                         {"id": 2, "order_no": "SO-2", "amount": 250.5}],
                "total": 2, "page": 1, "size": 20, "truncated": False}
-    service = ChatService(FakeClient(payload), RuleBasedIntentResolver())
+    service = ChatService(FakeClient(payload), _fixed_resolver())
     reply = run(service.handle("查订单", "tk"))
     assert "共 2 条订单" in reply.reply
     assert "350.50" in reply.reply
@@ -79,7 +93,7 @@ def test_partial_page_says_page_total_not_grand_total():
     # 只说「金额合计」会把本页合计当成全量，用户据此对账会差钱
     payload = {"rows": [{"id": 1, "order_no": "SO-1", "amount": 100.0}],
                "total": 3, "page": 1, "size": 1, "truncated": False}
-    service = ChatService(FakeClient(payload), RuleBasedIntentResolver())
+    service = ChatService(FakeClient(payload), _fixed_resolver())
     reply = run(service.handle("查订单 前1条", "tk"))
     assert "已显示前 1 条" in reply.reply
     assert "本页金额合计" in reply.reply
@@ -87,7 +101,7 @@ def test_partial_page_says_page_total_not_grand_total():
 
 def test_forbidden_is_explained_not_leaked():
     service = ChatService(FakeClient(query_error=SpringError(403, 403, "无此操作权限：biz:trade_order:read")),
-                          RuleBasedIntentResolver())
+                          _fixed_resolver())
     reply = run(service.handle("查订单", "tk"))
     assert reply.reply == "当前账号没有查看「订单」的权限。"
 
@@ -99,7 +113,7 @@ def test_delete_flow_previews_and_asks_confirmation():
                "total": 1, "page": 1, "size": 200, "truncated": False}
     client = FakeClient(payload, ticket=ticket())
     sessions = SessionStore()
-    service = ChatService(client, RuleBasedIntentResolver(), sessions)
+    service = ChatService(client, _fixed_resolver(), sessions)
 
     reply = run(service.handle("删除订单，订单号是SO-1", "tk", "s1", me={"id": 1}))
     assert "将删除「订单」 1 条" in reply.reply
@@ -110,7 +124,7 @@ def test_delete_flow_previews_and_asks_confirmation():
 
 
 def test_delete_without_match_asks_back():
-    service = ChatService(FakeClient(), RuleBasedIntentResolver())
+    service = ChatService(FakeClient(), _fixed_resolver())
     reply = run(service.handle("删除订单，订单号是SO-X", "tk"))
     assert reply.reply == "没有找到符合条件的订单。"
 
@@ -119,7 +133,7 @@ def test_delete_too_many_is_refused():
     # 删 500 条的预告文案谁都不会细看；确认的意义就是让人看清影响面
     payload = {"rows": [{"id": i} for i in range(200)],
                "total": 500, "page": 1, "size": 200, "truncated": True}
-    service = ChatService(FakeClient(payload), RuleBasedIntentResolver())
+    service = ChatService(FakeClient(payload), _fixed_resolver())
     reply = run(service.handle("删除订单，状态是CREATED", "tk"))
     assert "超出单次删除上限" in reply.reply
     assert "缩小范围" in reply.reply
@@ -129,7 +143,7 @@ def test_delete_too_many_is_refused():
 
 def ready_service(client, session_id="s1", token="tk"):
     sessions = SessionStore()
-    service = ChatService(client, RuleBasedIntentResolver(), sessions)
+    service = ChatService(client, _fixed_resolver(), sessions)
     run(service.handle("删除订单，订单号是SO-1", token, session_id, me={"id": 1}))
     return service, sessions
 
@@ -175,7 +189,7 @@ def test_confirmation_without_me_is_refused():
 
 
 def test_confirmation_without_pending():
-    service = ChatService(FakeClient(), RuleBasedIntentResolver())
+    service = ChatService(FakeClient(), _fixed_resolver())
     reply = run(service.handle("确认", "tk"))
     assert reply.reply == "当前没有待确认的操作。"
 
@@ -185,7 +199,7 @@ def test_expired_pending_is_treated_as_absent():
     sessions.put("s1", PendingConfirm(user_id=1, token="t", entity="trade_order", ids=(1,),
                                       summary="s",
                                       expires_at=datetime.now() - timedelta(seconds=1)))
-    service = ChatService(FakeClient(), RuleBasedIntentResolver(), sessions)
+    service = ChatService(FakeClient(), _fixed_resolver(), sessions)
     reply = run(service.handle("确认", "tk", "s1", me={"id": 1}))
     assert reply.reply == "当前没有待确认的操作。"
 

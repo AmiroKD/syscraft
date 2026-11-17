@@ -99,14 +99,22 @@ class ModelCatalog:
         return list(self._entities.values())
 
     def by_mention(self, text: str) -> EntityInfo | None:
-        """在自然语言里认实体：中文名优先，其次表名。"""
+        """在自然语言里认实体：中文名优先，其次表名。
+
+        候选有多个时取最长命中：「客户订单」与「客户」都含于
+        「客户订单加一个备注字段」，短名先命中会指错表（实测 F8 踩过）。
+        """
+        best = None
+        best_len = 0
         for info in self._entities.values():
-            if info.display_name and info.display_name in text:
-                return info
+            if info.display_name and info.display_name in text and len(info.display_name) > best_len:
+                best, best_len = info, len(info.display_name)
+        if best is not None:
+            return best
         for info in self._entities.values():
-            if info.entity in text:
-                return info
-        return None
+            if info.entity in text and len(info.entity) > best_len:
+                best, best_len = info, len(info.entity)
+        return best
 
     def by_name(self, name: str) -> EntityInfo | None:
         return self._entities.get(name)

@@ -51,3 +51,35 @@ def test_all_short_returns_none():
         {"column": "duty_date", "property": "dutyDate", "type": "DATE"},
     ]}
     assert updatable_field(entity) is None
+
+
+# ---------------- 样本构造：计算目标列排除 + DECIMAL 不按列名置空（S7/S8 根因） ----------------
+
+from syscraft.codegen.generator import _crud_sample, sample_value
+
+
+def test_decimal_gets_value_regardless_of_column_name():
+    # S7 expense_item.amount / S8 payment_record.amount：普通必填列，不能按列名置 None
+    f = {"column": "amount", "property": "amount", "type": "DECIMAL"}
+    assert sample_value(f) == 100
+
+
+def test_computed_target_excluded_from_sample():
+    entity = {"fields": [
+        {"column": "id", "property": "id", "type": "BIGINT", "primary_key": True},
+        {"column": "quantity", "property": "quantity", "type": "INT"},
+        {"column": "unit_price", "property": "unitPrice", "type": "DECIMAL"},
+        {"column": "amount", "property": "amount", "type": "DECIMAL", "nullable": False},
+    ], "rules": {"computed": [{"target": "amount", "left": "quantity",
+                               "right": "unit_price", "op": "multiply"}]}}
+    sample = _crud_sample(entity)
+    assert "amount" not in sample          # 服务端重算，传值无意义
+    assert sample["quantity"] == 2
+    assert sample["unit_price"] == 100
+
+
+def test_plain_amount_stays_in_sample():
+    entity = {"fields": [
+        {"column": "amount", "property": "amount", "type": "DECIMAL", "nullable": False},
+    ], "rules": {"computed": []}}
+    assert _crud_sample(entity) == {"amount": 100}

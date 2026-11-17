@@ -420,7 +420,7 @@ def build_acceptance(model: dict, written: dict[str, list[str]]) -> dict:
             "check": {"type": "crud", "base": base, "entity": entity["entity"],
                       "account": "__acc_admin__",
                       "updatableField": updatable_field(entity),
-                      "sample": {f["column"]: sample_value(f) for f in entity["fields"] if not f.get("primary_key")}},
+                      "sample": _crud_sample(entity)},
         })
 
     first_base = f"/api/biz/{model['entities'][0]['entity']}"
@@ -430,7 +430,7 @@ def build_acceptance(model: dict, written: dict[str, list[str]]) -> dict:
         "suspects": ["src/main/java/com/generated/platform/confirm/ConfirmService.java"],
         "check": {"type": "confirmReuse", "base": first_base, "entity": model["entities"][0]["entity"],
                   "account": "__acc_admin__",
-                  "sample": {f["column"]: sample_value(f) for f in model["entities"][0]["fields"] if not f.get("primary_key")},
+                  "sample": _crud_sample(model["entities"][0]),
                   "unique_fields": [f["column"] for f in model["entities"][0]["fields"]
                                     if f.get("unique") and not f.get("primary_key")]},
     })
@@ -460,7 +460,8 @@ def sample_value(field: dict):
     """验收数据的样本值：优先用模型里写死的 sample，否则按类型给默认值。
 
     按类型而非按字段名给值，是为了避免「订单号」这类语义猜测——
-    猜错了会在验收里制造假失败。
+    猜错了会在验收里制造假失败。计算目标列（服务端写入时重算，传值无意义）
+    由 _crud_sample 在构造样本时整体排除，不在此按列名猜。
     """
     if field.get("sample") is not None:
         return field["sample"]
@@ -468,9 +469,9 @@ def sample_value(field: dict):
     if model_type in ("VARCHAR", "TEXT"):
         return "T" + field["property"][:8]
     if model_type in ("INT", "BIGINT"):
-        return 2 if field["column"] != "id" else None
+        return 2
     if model_type == "DECIMAL":
-        return 100 if field["column"] != "amount" else None
+        return 100
     if model_type == "BOOLEAN":
         return True
     if model_type == "DATETIME":
@@ -478,6 +479,13 @@ def sample_value(field: dict):
     if model_type == "DATE":
         return "2026-11-09"
     return None
+
+
+def _crud_sample(entity: dict) -> dict:
+    """插入样本：非主键字段取样本值，计算规则的目标列除外（服务端重算）。"""
+    targets = {r.get("target") for r in entity.get("rules", {}).get("computed", [])}
+    return {f["column"]: sample_value(f) for f in entity["fields"]
+            if not f.get("primary_key") and f["column"] not in targets}
 
 
 def updatable_field(entity: dict) -> str | None:

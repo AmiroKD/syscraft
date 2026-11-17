@@ -193,7 +193,7 @@ class BusinessAgent:
         if short in CANCEL_WORDS and pending is not None:
             session.append("user", "text", message)
             session.set_slot("pending_confirm", None)
-            reply = "已取消本次删除，未执行任何操作。"
+            reply = "已取消本次操作，未执行任何修改或删除。"
             session.append("assistant", "text", reply)
             events.append({"type": "text", "text": reply})
             return {"user_message": message, "reply": reply, "stop": True, "events": events}
@@ -204,11 +204,19 @@ class BusinessAgent:
                 reply = "待确认的操作已超时（令牌 5 分钟有效），请重新发起。"
             else:
                 try:
-                    rows = await self._client.delete(pending["entity"], pending["ids"],
-                                                     pending["token"], state["token"])
-                    reply = f"已删除 {rows} 条。"
+                    if pending.get("op") == "update":
+                        # 确认后的修改走 update-confirmed：服务端核销 UPDATE 令牌，
+                        # 逐条「现有行 + values 覆盖」——与删除共用同一套三态机
+                        rows = await self._client.update_confirmed(
+                            pending["entity"], pending["ids"], pending["values"],
+                            pending["valuesHash"], pending["token"], state["token"])
+                        reply = f"已修改 {rows} 条。"
+                    else:
+                        rows = await self._client.delete(pending["entity"], pending["ids"],
+                                                         pending["token"], state["token"])
+                        reply = f"已删除 {rows} 条。"
                 except SpringError as error:
-                    reply = ("确认令牌已失效（过期或已被使用），请重新发起删除。"
+                    reply = ("确认令牌已失效（过期或已被使用），请重新发起操作。"
                              if error.status == 409 else f"执行失败：{error.message}")
             session.append("assistant", "text", reply)
             events.append({"type": "text", "text": reply})
@@ -599,4 +607,35 @@ def _spring_message(error: SpringError, entity: EntityInfo | None) -> str:
         return f"当前账号没有对「{label}」执行此操作的权限。"
     if error.status == 404:
         return f"系统里没有「{label}」的接口，可能版本不一致。"
+    if error.status == 400:
+        # 400 多为字段校验失败。把该表的字段与格式清单附在错误里，让模型在
+        # 下一轮自纠（实测：deepseek-flash 三次都凑不齐必填字段，提示后一轮就能对）
+        hint = _field_hints(entity)
+        message = f"操作失败：{error.message}"
+        if hint:
+            message += f"\n（{hint}）"
+        return message
     return f"操作失败：{error.message}"
+
+
+_TYPE_HINTS = {
+    "DATETIME": "时间，格式 yyyy-MM-dd HH:mm:ss",
+    "DATE": "日期，格式 yyyy-MM-dd",
+    "DECIMAL": "数值",
+    "INT": "整数",
+    "BIGINT": "整数",
+    "BOOLEAN": "true/false",
+}
+
+
+def _field_hints(entity: EntityInfo | None) -> str:
+    """实体字段清单提示（id/created_at 系统字段除外），帮助模型把参数一次凑对。"""
+    if entity is None:
+        return ""
+    parts = []
+    for f in entity.fields:
+        if f.column in ("id", "created_at", "updated_at"):
+            continue
+        type_hint = _TYPE_HINTS.get(f.type, f.type)
+        parts.append(f"{f.column}（{type_hint}）")
+    return f"「{entity.display_name}」的字段与格式：{'、'.join(parts)}" if parts else ""

@@ -7,6 +7,7 @@ import com.generated.generated.entity.{{ class_name }};
 import com.generated.generated.service.{{ class_name }}Service;
 import com.generated.platform.common.AggregateRequest;
 import com.generated.platform.common.ApiResponse;
+import com.generated.platform.common.ConfirmedUpdateRequest;
 import com.generated.platform.common.IdsRequest;
 import com.generated.platform.common.PageResult;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,6 +57,16 @@ public class {{ class_name }}Controller {
     public ApiResponse<Void> update(@RequestBody {{ class_name }} entity) {
         service.update(entity);
         return ApiResponse.ok();
+    }
+
+    /**
+     * 确认后的批量更新（协议 4.7）：令牌在服务内核销。对话驱动的修改一律走这里；
+     * 普通 update 保留给平台内部链路（如验收往返），权限注解照常拦截。
+     */
+    @SaCheckPermission("biz:{{ entity }}:update")
+    @PostMapping("/update-confirmed")
+    public ApiResponse<Integer> updateConfirmed(@RequestBody ConfirmedUpdateRequest req) {
+        return ApiResponse.ok(service.updateConfirmed(req));
     }
 
     @SaCheckPermission("biz:{{ entity }}:delete")

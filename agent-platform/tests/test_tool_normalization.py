@@ -167,3 +167,79 @@ async def test_order_by_string_and_dict_normalized():
         {"field": "capacity", "direction": "DESC"},
         {"field": "status", "direction": "ASC"},
     ]
+
+
+# ---------------- update 确认流（协议 4.7：修改与删除同为高危） ----------------
+
+class FakeConfirmClient(FakeClient):
+    """在 FakeClient 上补预告/确认执行两个方法，记录调用序列。"""
+
+    def __init__(self):
+        super().__init__()
+        self.confirmed_rows = 0
+
+    async def preview_update(self, entity, ids, values_hash, token):
+        self.calls.append(("preview_update", entity, ids, values_hash[:8]))
+        return {"token": "tok-u", "summary": f"将修改 {len(ids)} 条"}
+
+    async def update_confirmed(self, entity, ids, values, values_hash, confirm_token, token):
+        self.calls.append(("update_confirmed", entity, ids, dict(values)))
+        return len(ids)
+
+
+class FakeSession:
+    def __init__(self):
+        self.slots: dict = {}
+
+    def get_slot(self, key):
+        return self.slots.get(key)
+
+    def set_slot(self, key, value):
+        self.slots[key] = value
+
+
+@pytest.mark.anyio
+async def test_update_goes_through_confirmation():
+    """update 不再直通：先预告、槽位挂起，模型拿不到执行权。"""
+    toolbox, client = box()
+    client.__class__ = FakeConfirmClient
+    session = FakeSession()
+    result = await toolbox.call("update_records",
+                                {"entity": "活动", "id": 3, "values": {"名额上限": 88}},
+                                session)
+    assert result["status"] == "need_confirmation"
+    assert result["summary"].startswith("将修改")
+    # 预告已发（带 valuesHash），执行还没发生
+    assert client.calls[0][0] == "preview_update"
+    assert not any(call[0] == "update_confirmed" for call in client.calls)
+    # 槽位挂好了：op/令牌/值齐备，编排层核销时用
+    pending = session.get_slot("pending_confirm")
+    assert pending["op"] == "update"
+    assert pending["ids"] == [3]
+    assert pending["values"] == {"capacity": 88}
+    assert len(pending["valuesHash"]) == 64
+
+
+@pytest.mark.anyio
+async def test_update_values_cannot_touch_id():
+    """values 里混进 id 也不允许改主键：目标行由 ids/filter 决定。"""
+    toolbox, client = box()
+    client.__class__ = FakeConfirmClient
+    session = FakeSession()
+    result = await toolbox.call("update_records",
+                                {"entity": "活动", "id": 3,
+                                 "values": {"id": 99, "名额上限": 88}}, session)
+    pending = session.get_slot("pending_confirm")
+    assert "id" not in pending["values"]
+    assert result["status"] == "need_confirmation"
+
+
+@pytest.mark.anyio
+async def test_update_without_target_is_input_error():
+    """既没有 id 也没有 filter：参数错误，不进预告。"""
+    import pytest as _pytest
+    from syscraft.agent.tools import ToolInputError
+    toolbox, client = box()
+    client.__class__ = FakeConfirmClient
+    with _pytest.raises(ToolInputError):
+        await toolbox.call("update_records", {"entity": "活动", "values": {"名额上限": 88}})

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any
@@ -269,16 +270,48 @@ class ToolBox:
         return {"ok": True, "id": data, "display": entity.display_name}
 
     async def _update(self, args: dict, session: Any) -> dict:
+        """修改只做预告（协议 4.7：修改与删除同为高危）。执行权在编排层的确认路径，
+        模型拿不到令牌——与 delete 同一个结构性约束。"""
         entity = self._entity(args.get("entity", ""))
         values = _as_object(args.get("values"), "values")
         if not values:
             raise ToolInputError("update_records 需要 values（只放要修改的字段）")
+        values.pop("id", None)  # 主键不可改：目标行由 ids/filter 决定
         normalized = _normalize_row(entity, values)
         record_id = _int_arg(args.get("id"), None, 1, 2**63 - 1)
-        if record_id is None:
-            raise ToolInputError("update_records 需要正整数 id")
-        data = await self._client.update(entity.entity, {**normalized, "id": record_id}, self._token)
-        return {"ok": True, "updated": data}
+        ids: list[int] = []
+        if record_id is not None:
+            ids = [record_id]
+        elif args.get("filter"):
+            data = await self._client.query(
+                entity.entity,
+                {"filter": self._validate_filter(entity, args.get("filter")),
+                 "orderBy": [], "page": 1, "size": MAX_DELETE_SCAN},
+                self._token)
+            ids = sorted({row["id"] for row in data.get("rows", []) if row.get("id") is not None})
+            if data.get("total", 0) > MAX_DELETE_SCAN:
+                return {"ok": False, "status": "too_many",
+                        "total": data["total"],
+                        "message": f"符合条件的{entity.display_name}有 {data['total']} 条，"
+                                   f"超出单次修改上限（{MAX_DELETE_SCAN}），请缩小范围"}
+        if not ids:
+            raise ToolInputError("update_records 需要正整数 id 或能定位到记录的 filter")
+        if not normalized:
+            return {"ok": False, "status": "no_change",
+                    "message": "values 里没有可修改的字段（id 不可通过 update 修改）"}
+        values_hash = hashlib.sha256(
+            json.dumps(normalized, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        ticket = await self._client.preview_update(entity.entity, ids, values_hash, self._token)
+        if session is not None:
+            from datetime import datetime, timedelta
+            session.set_slot("pending_confirm", {
+                "op": "update", "token": ticket["token"], "entity": entity.entity,
+                "ids": ids, "values": normalized, "valuesHash": values_hash,
+                "summary": ticket["summary"],
+                "expiresAt": (datetime.now() + timedelta(minutes=4, seconds=50)).isoformat(timespec="seconds"),
+            })
+        return {"ok": True, "status": "need_confirmation",
+                "summary": ticket["summary"], "ids": ids}
 
     async def _delete(self, args: dict, session: Any) -> dict:
         """删除只做预告。执行权在编排层的确认路径，模型拿不到令牌。"""

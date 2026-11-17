@@ -114,6 +114,27 @@ class SpringClient:
         )
         return body["data"]
 
+    async def preview_update(self, entity: str, ids: list[int], values_hash: str,
+                             token: str) -> dict[str, Any]:
+        """更新预告（协议 4.7）：拿确认令牌与预告文案，op=UPDATE、指纹含 valuesHash。"""
+        body = await self._post(
+            "/api/confirm/preview-update",
+            {"entity": entity, "ids": ids, "valuesHash": values_hash},
+            token, request_id=uuid.uuid4().hex,
+        )
+        return body["data"]
+
+    async def update_confirmed(self, entity: str, ids: list[int], values: dict,
+                               values_hash: str, confirm_token: str, token: str) -> int:
+        """确认后的批量更新：服务端核销令牌后逐条「现有行 + values 覆盖」。"""
+        body = await self._post(
+            f"/api/biz/{entity}/update-confirmed",
+            {"ids": ids, "values": values, "valuesHash": values_hash,
+             "confirmToken": confirm_token},
+            token, request_id=uuid.uuid4().hex,
+        )
+        return body["data"]
+
     async def report_feature_request(self, raw_text: str, wanted_entity: str | None,
                                      token: str) -> dict[str, Any]:
         """需求池上报（底座扩展 v0.1）：记录「用户要了但系统没有」的能力。

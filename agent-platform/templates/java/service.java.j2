@@ -1,5 +1,6 @@
 package com.generated.generated.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -10,6 +11,7 @@ import com.generated.generated.mapper.{{ class_name }}Mapper;
 import com.generated.platform.audit.AuditService;
 import com.generated.platform.common.AggregateRequest;
 import com.generated.platform.common.BizException;
+import com.generated.platform.common.ConfirmedUpdateRequest;
 import com.generated.platform.common.Cond;
 import com.generated.platform.common.ErrorCode;
 import com.generated.platform.common.FilterGroup;
@@ -64,14 +66,16 @@ public class {{ class_name }}Service {
     private final ConfirmService confirmService;
     private final AuditService auditService;
     private final RowScope rowScope;
+    private final ObjectMapper objectMapper;
 
     public {{ class_name }}Service({{ class_name }}Mapper mapper, ConfirmService confirmService,
                                    ConfirmExecutorRegistry confirmExecutorRegistry, AuditService auditService,
-                                   RowScope rowScope) {
+                                   RowScope rowScope, ObjectMapper objectMapper) {
         this.mapper = mapper;
         this.confirmService = confirmService;
         this.auditService = auditService;
         this.rowScope = rowScope;
+        this.objectMapper = objectMapper;
         // 注册影响行数计算器：确认预告据此算「这次会删多少条」，不用为每个实体手写预告逻辑
         confirmExecutorRegistry.register("{{ entity }}", ids -> {
             if (ids == null || ids.isEmpty()) {
@@ -222,6 +226,76 @@ public class {{ class_name }}Service {
         checkTransition(existing, entity);
 {% endif %}
         mapper.updateById(entity);
+    }
+
+    /**
+     * 确认后的批量更新（协议 4.7：修改与删除同为高危）。流程与删除一致：
+     * 核销 UPDATE 令牌 → 审计 INTENT → 逐条「现有行 + values 覆盖」→ 校验/规则/状态机
+     * → 落库 → 审计回填 → 令牌 CONSUMED；业务失败则审计记 FAILED、令牌回退可重试。
+     *
+     * <p>覆盖语义：values 里出现的字段才改，其余字段保持原值（改一个字段不会
+     * 把其他字段清空）；归属字段不可变，id 不参与覆盖。valuesHash 在预告与执行
+     * 两侧进指纹——用户确认的「改成什么」与真正写库的内容绑定。</p>
+     */
+    @Transactional
+    public int updateConfirmed(ConfirmedUpdateRequest req) {
+        if (req == null || req.ids() == null || req.ids().isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "ids 不能为空");
+        }
+        List<Long> ids = req.ids().stream().filter(Objects::nonNull).distinct().sorted().toList();
+        if (ids.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "ids 不能为空");
+        }
+        String canonical = ids.stream().map(String::valueOf).collect(Collectors.joining(","))
+                + "|v=" + req.valuesHash();
+{% if owner_property %}
+        // 行级校验：非超管改不动别人的行（排在令牌核销前，403 不消耗令牌）
+        for ({{ class_name }} __row : mapper.selectByIds(ids)) {
+            rowScope.checkOwner(__row.get{{ owner_getter }}());
+        }
+{% endif %}
+        String tokenHash = confirmService.consume(req.confirmToken(), "UPDATE", "{{ entity }}", canonical);
+
+        // 审计 target 只记行 id（target_id 列 varchar(64)，哈希绑定在令牌指纹里）
+        String auditTarget = ids.stream().map(String::valueOf).collect(Collectors.joining(","));
+        long auditId = auditService.begin("修改{{ display_name }}", "{{ entity }}", auditTarget);
+        int rows = 0;
+        try {
+            for (Long id : ids) {
+                {{ class_name }} existing = mapper.selectById(id);
+                if (existing == null) {
+                    throw new BizException(ErrorCode.NOT_FOUND, "记录不存在：" + id);
+                }
+                {{ class_name }} target = objectMapper.convertValue(existing, {{ class_name }}.class);
+{% for f in fields %}
+{% if f.column != "id" and f.property != owner_property %}
+                if (req.values() != null && req.values().containsKey("{{ f.column }}")) {
+                    target.set{{ f.getter }}(objectMapper.convertValue(
+                            req.values().get("{{ f.column }}"), {{ f.java_type }}.class));
+                }
+{% endif %}
+{% endfor %}
+                validate(target);
+{% if computed_rules %}
+                applyComputed(target);
+{% endif %}
+{% if state_rule %}
+                checkTransition(existing, target);
+{% endif %}
+                mapper.updateById(target);
+                rows++;
+            }
+            auditService.success(auditId, rows,
+                    "{\"ids\":[" + ids.stream().map(String::valueOf).collect(Collectors.joining(",")) + "]}");
+            confirmService.markConsumed(tokenHash);
+            return rows;
+        } catch (RuntimeException e) {
+            String detail = "{\"ids\":[" + ids.stream().map(String::valueOf).collect(Collectors.joining(",")) + "],\"error\":\""
+                    + String.valueOf(e.getMessage()).replace("\"", "'") + "\"}";
+            auditService.failed(auditId, detail);
+            confirmService.release(tokenHash);
+            throw e;
+        }
     }
 
     /**

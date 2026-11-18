@@ -1,0 +1,228 @@
+{
+  "version": 1,
+  "modelVersion": "v48",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-shop_customer",
+      "category": "interface",
+      "level": "block",
+      "title": "客户 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/ShopCustomerController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/shop_customer",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-shop_customer",
+      "category": "interface",
+      "level": "block",
+      "title": "客户 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/ShopCustomerService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/shop_customer",
+        "entity": "shop_customer",
+        "account": "__acc_admin__",
+        "updatableField": "customer_name",
+        "sample": {
+          "customer_name": "Tcustomer",
+          "contact_info": "TcontactI",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-shop_order",
+      "category": "interface",
+      "level": "block",
+      "title": "订单 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/ShopOrderController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/shop_order",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-shop_order",
+      "category": "interface",
+      "level": "block",
+      "title": "订单 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/ShopOrderService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/shop_order",
+        "entity": "shop_order",
+        "account": "__acc_admin__",
+        "updatableField": "status",
+        "sample": {
+          "customer_id": 2,
+          "status": "Tstatus",
+          "total_amount": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-shop_order_line",
+      "category": "interface",
+      "level": "block",
+      "title": "订单明细 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/ShopOrderLineController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/shop_order_line",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-shop_order_line",
+      "category": "interface",
+      "level": "block",
+      "title": "订单明细 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/ShopOrderLineService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/shop_order_line",
+        "entity": "shop_order_line",
+        "account": "__acc_admin__",
+        "updatableField": "product_name",
+        "sample": {
+          "order_id": 2,
+          "product_name": "TproductN",
+          "quantity": 2,
+          "unit_price": 100,
+          "line_amount": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/shop_customer",
+        "entity": "shop_customer",
+        "account": "__acc_admin__",
+        "sample": {
+          "customer_name": "Tcustomer",
+          "contact_info": "TcontactI",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": []
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/shop_customer/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/shop_customer/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/shop_customer/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

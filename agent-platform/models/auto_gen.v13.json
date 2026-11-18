@@ -1,0 +1,212 @@
+{
+  "model_version": "v13",
+  "entities": [
+    {
+      "entity": "item",
+      "class_name": "Item",
+      "display_name": "物品",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "物品名称，全局唯一，如「投影仪」「折叠梯」",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "unit",
+          "property": "unit",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "计量单位，如「台」「把」「个」",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "物品备注，如存放位置、型号",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "item_borrow",
+      "class_name": "ItemBorrow",
+      "display_name": "物品借用记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "item_id",
+          "property": "itemId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借用物品，外键指向物品表",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "quantity",
+          "property": "quantity",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "本次借用数量，必须为正整数",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "borrower",
+          "property": "borrower",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借用人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "borrow_date",
+          "property": "borrowDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借用日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "return_status",
+          "property": "returnStatus",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "归还状态：未归还/已归还",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "return_date",
+          "property": "returnDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "实际归还日期，状态为已归还时填写",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "借用备注，如用途、损坏情况",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "item",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "item_borrow",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "数量按件计，不区分单位换算，单位仅作展示（item.unit）。",
+    "系统只做借用登记台账，不维护库存数量与扣减/归还回补逻辑，是否需要库存控制在后续迭代确认。",
+    "同一物品允许被多次、多人借用，每次借用生成一条 item_borrow 记录。",
+    "归还状态流转为「未归还 → 已归还」，转为已归还时应同时填写 return_date，该联动校验由应用层保证。",
+    "借用人以姓名字符串记录，暂不关联系统用户账号；如需对接人员主数据再补充外键。",
+    "物品名称唯一，避免同名物品产生多条台账口径。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

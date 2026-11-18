@@ -1,0 +1,187 @@
+{
+  "model_version": "v42",
+  "entities": [
+    {
+      "entity": "ledger_device",
+      "class_name": "LedgerDevice",
+      "display_name": "设备台账",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "device_name",
+          "property": "deviceName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "设备名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "device_code",
+          "property": "deviceCode",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "设备编号，全系统唯一",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "purchase_date",
+          "property": "purchaseDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "购置日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "device_status",
+          "property": "deviceStatus",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "设备状态：在用/维修/报废",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "ledger_device_repair",
+      "class_name": "LedgerDeviceRepair",
+      "display_name": "设备维修记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "device_id",
+          "property": "deviceId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属设备ID，外键指向 ledger_device.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "repair_date",
+          "property": "repairDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "维修日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "fault_desc",
+          "property": "faultDesc",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "故障描述",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "repair_fee",
+          "property": "repairFee",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "维修费用（元，含税）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "ledger_device",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "ledger_device_repair",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "设备编号由人工录入并保证唯一，系统不做自动编码规则生成",
+    "设备状态仅有三态（在用/维修/报废），初始状态为「在用」",
+    "维修费用以人民币元为单位，按含税金额记录，精度保留两位小数",
+    "一台设备可登记多条维修记录，维修记录不允许脱离设备单独存在",
+    "状态流转由管理员手工维护：登记维修时置为「维修」，维修完成后可回「在用」，报废为终态",
+    "设备报废后不再新增维修记录，该跨表校验由业务层控制，未建模为业务规则",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

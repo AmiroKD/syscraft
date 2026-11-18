@@ -1,0 +1,191 @@
+{
+  "model_version": "v24",
+  "entities": [
+    {
+      "entity": "reimburse_form",
+      "class_name": "ReimburseForm",
+      "display_name": "报销单",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "form_no",
+          "property": "formNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "报销单号，业务唯一编号",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 32
+        },
+        {
+          "column": "claimant_name",
+          "property": "claimantName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "reason",
+          "property": "reason",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销事由",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 500
+        },
+        {
+          "column": "total_amount",
+          "property": "totalAmount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销总金额（元），等于各明细金额之和，由系统汇总回写",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 12
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销单状态：草稿/已提交/已审批/已驳回/已支付",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "reimburse_item",
+      "class_name": "ReimburseItem",
+      "display_name": "报销明细",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "form_id",
+          "property": "formId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属报销单ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "purpose",
+          "property": "purpose",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "明细用途说明",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "amount",
+          "property": "amount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "该条明细的金额（元）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 12
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "reimburse_form",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "reimburse_item",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "报销单总金额 = 该单下所有明细金额之和，属于跨表聚合回写，规则引擎不支持，由服务层在明细增删改后汇总写入 total_amount。",
+    "金额均为人民币含税金额，保留两位小数。",
+    "报销人以姓名文本（claimant_name）登记，不强制与已有 member 表做外键关联；若后续需实名关联，可增加 member_id 外键。",
+    "单号 form_no 由业务规则生成（如 BX + 年月 + 流水号），需全局唯一。",
+    "已存在同名实体 expense_claim/expense_item，为避免重名，本次建模使用 reimburse_form/reimburse_item。",
+    "明细至少一条、总额大于 0 才允许提交，属业务校验，暂不写入规则引擎。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

@@ -1,0 +1,419 @@
+{
+  "model_version": "v36",
+  "entities": [
+    {
+      "entity": "client",
+      "class_name": "Client",
+      "display_name": "客户",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "客户名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "contact_info",
+          "property": "contactInfo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "联系方式（手机号/邮箱/微信等）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "contact_person",
+          "property": "contactPerson",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "联系人",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "goods",
+      "class_name": "Goods",
+      "display_name": "商品",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "商品名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "spec",
+          "property": "spec",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "规格型号",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "unit",
+          "property": "unit",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "计量单位",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "price",
+          "property": "price",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "商品默认单价",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 12
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "client_order",
+      "class_name": "ClientOrder",
+      "display_name": "订单",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "order_no",
+          "property": "orderNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "订单编号",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 32
+        },
+        {
+          "column": "client_id",
+          "property": "clientId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属客户",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "订单状态：待审/已审/完成",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "order_date",
+          "property": "orderDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "下单日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "total_quantity",
+          "property": "totalQuantity",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "订单总数量（明细汇总回写）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "total_amount",
+          "property": "totalAmount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "订单总金额（明细金额汇总回写）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 14
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "订单备注",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "client_order_line",
+      "class_name": "ClientOrderLine",
+      "display_name": "订单明细",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "order_id",
+          "property": "orderId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属订单",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "goods_id",
+          "property": "goodsId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "商品",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "quantity",
+          "property": "quantity",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "数量",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "unit_price",
+          "property": "unitPrice",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "成交单价（默认取商品单价，可覆盖）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 12
+        },
+        {
+          "column": "amount",
+          "property": "amount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "小计金额 = 数量 × 单价（自动计算）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 14
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "明细备注",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "client",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "goods",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "client_order",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "client_order_line",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "订单金额由明细行小计汇总得出：total_amount 为同一订单下各明细 amount 之和，属跨行聚合，不在规则引擎内，由前端/后端在下单与改单时汇总回写。",
+    "明细单价 unit_price 默认取 goods.price 快照，允许下单时手工覆盖，商品改价不影响历史订单。",
+    "金额按含税单价直接计算，不做税率拆分与折扣分摊。",
+    "状态流转为单向：待审→已审→完成，不允许跳级；如需作废/回退由订单管理员线下处理，暂不建模。",
+    "订单状态变为“完成”时不触发库存扣减，库存相关逻辑不在本次范围内。",
+    "删除订单采用逻辑标记或直接物理删除由运维决定，本次仅建模业务字段。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

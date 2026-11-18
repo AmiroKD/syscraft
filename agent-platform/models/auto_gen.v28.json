@@ -1,0 +1,201 @@
+{
+  "model_version": "v28",
+  "entities": [
+    {
+      "entity": "gather",
+      "class_name": "Gather",
+      "display_name": "活动",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动名称，如「春季踏青一日游」",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "start_time",
+          "property": "startTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动开始时间（含日期与时刻）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "location",
+          "property": "location",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "活动地点，可为详细地址或场地名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 200
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "活动补充说明（集合方式、注意事项等）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 500
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "gather_signup",
+      "class_name": "GatherSignup",
+      "display_name": "活动报名记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "gather_id",
+          "property": "gatherId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所报名的活动 ID，关联 gather.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "person_name",
+          "property": "personName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "contact_phone",
+          "property": "contactPhone",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名人联系方式，默认按手机号存储",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "signup_time",
+          "property": "signupTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名提交时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名状态：待确认/已确认/已取消",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "gather",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "gather_signup",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "活动「时间」建模为单个开始时间字段 start_time，未单独设置结束时间；如需时长可后续扩展 end_time。",
+    "报名人「联系方式」默认按手机号处理，以 VARCHAR(20) 存储，暂不拆分手机号/邮箱。",
+    "需求未提报名状态，推断需要审核流程，故为报名记录增加 status 三态：待确认→已确认/已取消。",
+    "需求未提报名人数上限，暂不做名额控制；若需要「满员即停止报名」，属于跨表计数校验，后续以业务校验实现。",
+    "同一活动下同一联系方式的重复报名限制为跨表唯一性校验，当前模型不声明唯一约束，建议在应用层拦截。",
+    "已有实体名 activity/activity_signup/event_registration 等已被占用，本需求使用 gather/gather_signup 命名以避免重名。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

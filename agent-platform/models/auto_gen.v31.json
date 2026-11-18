@@ -1,0 +1,212 @@
+{
+  "model_version": "v31",
+  "entities": [
+    {
+      "entity": "meeting_session",
+      "class_name": "MeetingSession",
+      "display_name": "会议",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "title",
+          "property": "title",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "会议主题",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "meeting_date",
+          "property": "meetingDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "会议日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "location",
+          "property": "location",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "会议地点",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "organizer",
+          "property": "organizer",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "组织人/主办部门",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "meeting_status",
+          "property": "meetingStatus",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "会议状态：未开始/进行中/已结束",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "checkin_record",
+      "class_name": "CheckinRecord",
+      "display_name": "签到记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "meeting_id",
+          "property": "meetingId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属会议ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "attendee_name",
+          "property": "attendeeName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "参会人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "department",
+          "property": "department",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "参会人所属部门",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "checkin_time",
+          "property": "checkinTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "实际签到时间，未签到时为空",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "checkin_status",
+          "property": "checkinStatus",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "签到状态：未签到/已签到",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "meeting_session",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "checkin_record",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "参会人姓名与部门为签到现场录入的文本信息，不关联已有成员档案表。",
+    "同一会议下同一姓名+部门视为同一参会人，只允许一条签到记录，重复签到视为无效（跨行唯一性校验由应用层实现）。",
+    "签到时间应在会议日期当天，早于会议日期或晚于会议结束后仍允许记录，由管理员人工核对，不做跨表强校验。",
+    "会议状态按 未开始→进行中→已结束 单向流转，由管理员手动或按日期自动切换。",
+    "签到时间为空表示尚未签到，签到时写入当前系统时间。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

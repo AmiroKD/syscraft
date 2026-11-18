@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "modelVersion": "v34",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-expense_report",
+      "category": "interface",
+      "level": "block",
+      "title": "报销单 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/ExpenseReportController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/expense_report",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-expense_report",
+      "category": "interface",
+      "level": "block",
+      "title": "报销单 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/ExpenseReportService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/expense_report",
+        "entity": "expense_report",
+        "account": "__acc_admin__",
+        "updatableField": "reason",
+        "sample": {
+          "report_no": "TreportNo",
+          "claimant": "Tclaimant",
+          "reason": "Treason",
+          "total_amount": 100,
+          "status": "Tstatus",
+          "submit_date": "2026-11-09",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-expense_report_line",
+      "category": "interface",
+      "level": "block",
+      "title": "报销明细行 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/ExpenseReportLineController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/expense_report_line",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-expense_report_line",
+      "category": "interface",
+      "level": "block",
+      "title": "报销明细行 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/ExpenseReportLineService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/expense_report_line",
+        "entity": "expense_report_line",
+        "account": "__acc_admin__",
+        "updatableField": "purpose",
+        "sample": {
+          "expense_report_id": 2,
+          "purpose": "Tpurpose",
+          "amount": 100,
+          "expense_date": "2026-11-09",
+          "line_no": 2,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/expense_report",
+        "entity": "expense_report",
+        "account": "__acc_admin__",
+        "sample": {
+          "report_no": "TreportNo",
+          "claimant": "Tclaimant",
+          "reason": "Treason",
+          "total_amount": 100,
+          "status": "Tstatus",
+          "submit_date": "2026-11-09",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": [
+          "report_no"
+        ]
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/expense_report/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/expense_report/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/expense_report/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

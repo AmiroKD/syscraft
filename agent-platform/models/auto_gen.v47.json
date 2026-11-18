@@ -1,0 +1,314 @@
+{
+  "model_version": "v47",
+  "entities": [
+    {
+      "entity": "track_project",
+      "class_name": "TrackProject",
+      "display_name": "项目",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "项目名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "deadline",
+          "property": "deadline",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "截止日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "track_member",
+      "class_name": "TrackMember",
+      "display_name": "成员",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "成员姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "email",
+          "property": "email",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": true,
+          "semantic": "成员邮箱",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "member_role",
+          "property": "memberRole",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "成员角色：管理员/普通成员",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "track_project_member",
+      "class_name": "TrackProjectMember",
+      "display_name": "项目成员关系",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "project_id",
+          "property": "projectId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属项目ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "member_id",
+          "property": "memberId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "参与成员ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "track_task",
+      "class_name": "TrackTask",
+      "display_name": "任务",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "title",
+          "property": "title",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "任务标题",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 200
+        },
+        {
+          "column": "project_id",
+          "property": "projectId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "关联项目ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "owner_id",
+          "property": "ownerId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "任务负责人ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "任务状态：待办/进行中/完成",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "hours",
+          "property": "hours",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "任务工时（小时）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "track_project",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "track_member",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "track_project_member",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "track_task",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "工时以小时为单位，允许小数，使用 DECIMAL 存储",
+    "任务负责人从成员表中选取，可不填（未分配）",
+    "「普通成员只能看自己参与的项目」属于数据权限过滤，通过 track_project_member 关联表加查询条件实现，不作为建表规则",
+    "项目与成员为多对多关系，通过 track_project_member 关系表落地，同一项目下同一成员不重复（唯一约束由实现层保证）",
+    "任务状态流转顺序为 待办 → 进行中 → 完成，允许跳级由业务层控制",
+    "已清理项目后其下任务与成员关系按外键级联或人工清理，具体删除策略由实现层决定",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

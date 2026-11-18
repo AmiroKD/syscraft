@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "modelVersion": "v42",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-ledger_device",
+      "category": "interface",
+      "level": "block",
+      "title": "设备台账 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/LedgerDeviceController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/ledger_device",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-ledger_device",
+      "category": "interface",
+      "level": "block",
+      "title": "设备台账 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/LedgerDeviceService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/ledger_device",
+        "entity": "ledger_device",
+        "account": "__acc_admin__",
+        "updatableField": "device_name",
+        "sample": {
+          "device_name": "TdeviceNa",
+          "device_code": "TdeviceCo",
+          "purchase_date": "2026-11-09",
+          "device_status": "TdeviceSt",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-ledger_device_repair",
+      "category": "interface",
+      "level": "block",
+      "title": "设备维修记录 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/LedgerDeviceRepairController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/ledger_device_repair",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-ledger_device_repair",
+      "category": "interface",
+      "level": "block",
+      "title": "设备维修记录 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/LedgerDeviceRepairService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/ledger_device_repair",
+        "entity": "ledger_device_repair",
+        "account": "__acc_admin__",
+        "updatableField": "fault_desc",
+        "sample": {
+          "device_id": 2,
+          "repair_date": "2026-11-09",
+          "fault_desc": "TfaultDes",
+          "repair_fee": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/ledger_device",
+        "entity": "ledger_device",
+        "account": "__acc_admin__",
+        "sample": {
+          "device_name": "TdeviceNa",
+          "device_code": "TdeviceCo",
+          "purchase_date": "2026-11-09",
+          "device_status": "TdeviceSt",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": [
+          "device_code"
+        ]
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/ledger_device/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/ledger_device/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/ledger_device/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

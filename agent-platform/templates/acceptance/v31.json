@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "modelVersion": "v31",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-meeting_session",
+      "category": "interface",
+      "level": "block",
+      "title": "会议 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/MeetingSessionController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/meeting_session",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-meeting_session",
+      "category": "interface",
+      "level": "block",
+      "title": "会议 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/MeetingSessionService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/meeting_session",
+        "entity": "meeting_session",
+        "account": "__acc_admin__",
+        "updatableField": "title",
+        "sample": {
+          "title": "Ttitle",
+          "meeting_date": "2026-11-09",
+          "location": "Tlocation",
+          "organizer": "Torganize",
+          "meeting_status": "TmeetingS",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-checkin_record",
+      "category": "interface",
+      "level": "block",
+      "title": "签到记录 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/CheckinRecordController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/checkin_record",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-checkin_record",
+      "category": "interface",
+      "level": "block",
+      "title": "签到记录 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/CheckinRecordService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/checkin_record",
+        "entity": "checkin_record",
+        "account": "__acc_admin__",
+        "updatableField": "attendee_name",
+        "sample": {
+          "meeting_id": 2,
+          "attendee_name": "Tattendee",
+          "department": "Tdepartme",
+          "checkin_time": "2026-11-09T10:00:00",
+          "checkin_status": "TcheckinS",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/meeting_session",
+        "entity": "meeting_session",
+        "account": "__acc_admin__",
+        "sample": {
+          "title": "Ttitle",
+          "meeting_date": "2026-11-09",
+          "location": "Tlocation",
+          "organizer": "Torganize",
+          "meeting_status": "TmeetingS",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": []
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/meeting_session/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/meeting_session/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/meeting_session/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

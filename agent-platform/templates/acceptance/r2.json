@@ -58,6 +58,7 @@
         "base": "/api/biz/reg_customer",
         "entity": "reg_customer",
         "account": "__acc_admin__",
+        "updatableField": "name",
         "sample": {
           "name": "Tname",
           "phone": "Tphone",
@@ -98,10 +99,11 @@
         "base": "/api/biz/reg_order",
         "entity": "reg_order",
         "account": "__acc_admin__",
+        "updatableField": "order_no",
         "sample": {
           "order_no": "TorderNo",
           "customer_id": 2,
-          "amount": null,
+          "amount": 100,
           "created_at": "2026-11-09T10:00:00"
         }
       }

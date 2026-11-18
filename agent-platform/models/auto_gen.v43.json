@@ -1,0 +1,114 @@
+{
+  "model_version": "v43",
+  "entities": [
+    {
+      "entity": "shift_schedule",
+      "class_name": "ShiftSchedule",
+      "display_name": "值班排班表",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "duty_date",
+          "property": "dutyDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "值班日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "shift_code",
+          "property": "shiftCode",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "班次，取值：早/中/晚",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 10
+        },
+        {
+          "column": "duty_person",
+          "property": "dutyPerson",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "值班人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "contact_phone",
+          "property": "contactPhone",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "值班人联系方式（手机号）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注，如调班说明",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 200
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "shift_schedule",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "「同一日期同一班次只能排一个人」为跨字段唯一性约束，无法用单字段 constraint 表达，因此在 duty_date + shift_code 上建立联合唯一索引，由数据库保证唯一。",
+    "班次以中文枚举值「早」「中」「晚」直接存储，不单独建班次字典表。",
+    "值班人以姓名字符串记录，不关联人员/员工主数据表；如后续需要关联人员表，再增加 duty_person_id 外键。",
+    "联系方式按手机号存储，最长 20 位，仅做非空校验，不强制格式校验。",
+    "排班表不含审批或状态流转，值班记录一经创建即为生效；调班通过修改值班人与联系方式实现，变更原因写入 remark。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

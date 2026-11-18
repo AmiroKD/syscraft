@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "modelVersion": "v51",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-simple_customer",
+      "category": "interface",
+      "level": "block",
+      "title": "客户 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/SimpleCustomerController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/simple_customer",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-simple_customer",
+      "category": "interface",
+      "level": "block",
+      "title": "客户 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/SimpleCustomerService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/simple_customer",
+        "entity": "simple_customer",
+        "account": "__acc_admin__",
+        "updatableField": "cust_name",
+        "sample": {
+          "cust_name": "TcustName",
+          "contact": "Tcontact",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-simple_product",
+      "category": "interface",
+      "level": "block",
+      "title": "商品 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/SimpleProductController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/simple_product",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-simple_product",
+      "category": "interface",
+      "level": "block",
+      "title": "商品 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/SimpleProductService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/simple_product",
+        "entity": "simple_product",
+        "account": "__acc_admin__",
+        "updatableField": "spec",
+        "sample": {
+          "product_name": "TproductN",
+          "spec": "Tspec",
+          "unit_price": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-simple_order",
+      "category": "interface",
+      "level": "block",
+      "title": "订单 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/SimpleOrderController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/simple_order",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-simple_order",
+      "category": "interface",
+      "level": "block",
+      "title": "订单 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/SimpleOrderService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/simple_order",
+        "entity": "simple_order",
+        "account": "__acc_admin__",
+        "updatableField": "order_no",
+        "sample": {
+          "order_no": "TorderNo",
+          "customer_id": 2,
+          "order_status": "TorderSta",
+          "order_date": "2026-11-09",
+          "total_amount": 100,
+          "created_at": "2026-11-09T10:00:00",
+          "date": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-simple_order_line",
+      "category": "interface",
+      "level": "block",
+      "title": "订单明细 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/SimpleOrderLineController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/simple_order_line",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-simple_order_line",
+      "category": "interface",
+      "level": "block",
+      "title": "订单明细 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/SimpleOrderLineService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/simple_order_line",
+        "entity": "simple_order_line",
+        "account": "__acc_admin__",
+        "updatableField": null,
+        "sample": {
+          "order_id": 2,
+          "product_id": 2,
+          "quantity": 2,
+          "unit_price": 100,
+          "amount": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/simple_customer",
+        "entity": "simple_customer",
+        "account": "__acc_admin__",
+        "sample": {
+          "cust_name": "TcustName",
+          "contact": "Tcontact",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": []
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/simple_customer/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/simple_customer/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/simple_customer/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

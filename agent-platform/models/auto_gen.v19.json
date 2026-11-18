@@ -1,0 +1,224 @@
+{
+  "model_version": "v19",
+  "entities": [
+    {
+      "entity": "device_ledger",
+      "class_name": "DeviceLedger",
+      "display_name": "设备台账",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "device_name",
+          "property": "deviceName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "设备名称，如“数控车床1号”",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "device_code",
+          "property": "deviceCode",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "设备编号，全台账唯一，作为资产标识",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "purchase_date",
+          "property": "purchaseDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "购置日期，用于折旧与保修期判断",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "设备状态：在用/维修/报废",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "location",
+          "property": "location",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "设备存放或使用位置（部门、车间、机房）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注，如规格型号、供应商等补充信息",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "device_repair",
+      "class_name": "DeviceRepair",
+      "display_name": "设备维修记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "device_id",
+          "property": "deviceId",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属设备ID，指向 device_ledger.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "repair_date",
+          "property": "repairDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "维修发生日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "fault_desc",
+          "property": "faultDesc",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "故障描述，记录异常现象与处理方式",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 500
+        },
+        {
+          "column": "cost",
+          "property": "cost",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "维修费用，默认人民币，精度 12,2",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "vendor",
+          "property": "vendor",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "维修单位或维修人，便于追溯",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "device_ledger",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "device_repair",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "“device”“equipment”“repair_record” 已被既有实体占用，故设备台账与维修记录分别命名 device_ledger、device_repair。",
+    "设备编号 device_code 全局唯一，作为资产台账的主识别码；名称允许重复（同型号多台）。",
+    "购置日期允许为空，以兼顾历史遗留或盘盈设备先行建档、后补信息的情况。",
+    "维修费用按人民币含税金额记录，DECIMAL(12,2)；不做跨表累计汇总（单台设备累计维修费由报表计算，不入库冗余）。",
+    "状态流转仅按 在用 → 维修 → 在用 / 在用|维修 → 报废 进行，报废为终态，跨表约束“报废设备不可新增维修记录”由业务校验实现，规则引擎不支持。",
+    "维修记录仅在设备处于“维修”状态时登记为常规业务流程，历史补录允许在“在用”状态下登记。",
+    "location、remark、vendor 为便于台账管理补充的可选字段，不影响需求核心字段。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

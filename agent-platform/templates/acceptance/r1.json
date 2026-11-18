@@ -58,6 +58,7 @@
         "base": "/api/biz/reg_task",
         "entity": "reg_task",
         "account": "__acc_admin__",
+        "updatableField": "title",
         "sample": {
           "title": "Ttitle",
           "priority": "1",

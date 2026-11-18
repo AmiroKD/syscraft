@@ -1,0 +1,135 @@
+{
+  "model_version": "v30",
+  "entities": [
+    {
+      "entity": "borrow_ledger",
+      "class_name": "BorrowLedger",
+      "display_name": "物品借用登记",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "item_name",
+          "property": "itemName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "物品名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "quantity",
+          "property": "quantity",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借用数量",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "borrower",
+          "property": "borrower",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借用人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "borrow_date",
+          "property": "borrowDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借用日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "return_date",
+          "property": "returnDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "实际归还日期，未归还时为空",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "return_status",
+          "property": "returnStatus",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "归还状态：未归还/已归还",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "borrow_ledger",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "物品信息直接记录在借用流水上（以名称和数量作为快照），不单独建物品库存实体；库存扣减类跨表规则不在本系统范围内。",
+    "归还状态只有两态：未归还 → 已归还，新建登记默认为未归还。",
+    "归还日期在状态变为已归还时填写，未归还时允许为空。",
+    "借用人以姓名字符串登记，不强制关联已有会员或人员实体。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

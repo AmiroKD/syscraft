@@ -1,0 +1,213 @@
+{
+  "model_version": "v25",
+  "entities": [
+    {
+      "entity": "club_member",
+      "class_name": "ClubMember",
+      "display_name": "社团会员",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "member_name",
+          "property": "memberName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "会员姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "student_no",
+          "property": "studentNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "学号，全校唯一",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 30
+        },
+        {
+          "column": "department",
+          "property": "department",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所在院系",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "join_date",
+          "property": "joinDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "入社日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "会员状态：在社/退社",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "club_fee",
+      "class_name": "ClubFee",
+      "display_name": "会费缴费记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "club_member_id",
+          "property": "clubMemberId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属会员，外键指向 club_member.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "amount",
+          "property": "amount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "缴费金额，单位元，保留两位小数",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "pay_date",
+          "property": "payDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "缴费日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "pay_status",
+          "property": "payStatus",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "到账状态：未到账/已到账",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注，如缴费周期、支付方式",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 200
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "club_member",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "club_fee",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "原 member、payment_record 实体已被占用，本需求新建 club_member 与 club_fee 两个实体承载社团会员与会费缴纳。",
+    "学号视为全局唯一，作为会员去重依据，因此 student_no 设 unique 约束。",
+    "缴费金额按人民币元计，不含税、不做币种区分，必须大于 0。",
+    "一个会员可产生多条缴费记录（如按期缴纳会费），故为多对一关系。",
+    "缴费记录必须先关联到已存在的会员，不支持匿名缴费。",
+    "是否到账以 pay_status 状态字段表达，初始为「未到账」，财务确认收款后流转为「已到账」；已到账记录不允许删除。",
+    "退社会员的历史缴费记录保留，仅将会员状态置为「退社」。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

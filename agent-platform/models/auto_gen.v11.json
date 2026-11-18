@@ -1,0 +1,246 @@
+{
+  "model_version": "v11",
+  "entities": [
+    {
+      "entity": "campaign",
+      "class_name": "Campaign",
+      "display_name": "活动",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "start_time",
+          "property": "startTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动开始时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "end_time",
+          "property": "endTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "活动结束时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "location",
+          "property": "location",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动地点",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 200
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动状态：草稿/报名中/已结束",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "活动说明",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "campaign_signup",
+      "class_name": "CampaignSignup",
+      "display_name": "活动报名",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "campaign_id",
+          "property": "campaignId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属活动ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "person_name",
+          "property": "personName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "contact_phone",
+          "property": "contactPhone",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名人联系方式（手机号）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 30
+        },
+        {
+          "column": "contact_email",
+          "property": "contactEmail",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "报名人备用邮箱",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "signup_time",
+          "property": "signupTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名提交时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名状态：待确认/已确认/已取消",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "note",
+          "property": "note",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "报名备注",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "campaign",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "campaign_signup",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "“活动时间”按开始时间+结束时间两个字段建模，结束时间允许为空（活动时长待定）。",
+    "联系方式以手机号为主，邮箱作为可选备用联系方式。",
+    "同一活动下同一手机号不允许重复报名，该校验属于跨行唯一性约束，由应用层实现。",
+    "报名名额上限未提出，暂不建模；若后续需要，可增加 campaign.capacity 并在报名时做库存式校验（跨表扣减规则不支持，需应用层实现）。",
+    "已有 activity/event/signup 等实体与本次需求语义相近但名称不可重复，本次活动中使用 campaign 与 campaign_signup 作为新实体名。",
+    "报名时间默认取提交时刻，由应用层写入。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

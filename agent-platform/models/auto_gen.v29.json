@@ -1,0 +1,188 @@
+{
+  "model_version": "v29",
+  "entities": [
+    {
+      "entity": "book_item",
+      "class_name": "BookItem",
+      "display_name": "图书",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "book_no",
+          "property": "bookNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "图书编号，馆内唯一标识",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 32
+        },
+        {
+          "column": "title",
+          "property": "title",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "书名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 128
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注（如版本、册次）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "lend_record",
+      "class_name": "LendRecord",
+      "display_name": "借阅记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "book_item_id",
+          "property": "bookItemId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所借图书ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "borrower_name",
+          "property": "borrowerName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借阅人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 64
+        },
+        {
+          "column": "borrow_date",
+          "property": "borrowDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借出日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "return_date",
+          "property": "returnDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "归还日期，为空表示尚未归还",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "借阅状态：借出/已归还",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 16
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "book_item",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "lend_record",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "图书编号（book_no）在馆内唯一，作为图书的业务标识。",
+    "借阅人以文本姓名记录，不引入独立读者实体（需求未涉及读者档案）。",
+    "归还日期为空即表示该书仍在借出中，登记归还时回填日期并把状态置为已归还。",
+    "同一本书同时只能有一条未归还记录（跨表唯一性校验，由业务端保证，不建模为规则）。",
+    "借阅记录保留全部历史，图书归还后不清空记录。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

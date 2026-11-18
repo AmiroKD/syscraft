@@ -1,0 +1,418 @@
+{
+  "model_version": "v37",
+  "entities": [
+    {
+      "entity": "project_profile",
+      "class_name": "ProjectProfile",
+      "display_name": "项目",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "project_name",
+          "property": "projectName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "项目名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "deadline",
+          "property": "deadline",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "项目截止日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "description",
+          "property": "description",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "项目说明",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "manager_id",
+          "property": "managerId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "项目负责人，关联成员表主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "project_status",
+          "property": "projectStatus",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "项目状态：筹备/进行中/已结束",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "project_task",
+      "class_name": "ProjectTask",
+      "display_name": "任务",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "project_id",
+          "property": "projectId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属项目，关联 project_profile.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "task_name",
+          "property": "taskName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "任务名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 150
+        },
+        {
+          "column": "owner_id",
+          "property": "ownerId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "任务负责人，关联成员表主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "任务状态：待办/进行中/完成",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "work_hours",
+          "property": "workHours",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "工时，单位小时，保留1位小数",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 8
+        },
+        {
+          "column": "due_date",
+          "property": "dueDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "任务计划完成日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "任务备注",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "project_participant",
+      "class_name": "ProjectParticipant",
+      "display_name": "成员",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "member_name",
+          "property": "memberName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "成员姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "member_no",
+          "property": "memberNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "成员工号，唯一",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 30
+        },
+        {
+          "column": "email",
+          "property": "email",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "成员邮箱",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "department",
+          "property": "department",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "所属部门",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "job_title",
+          "property": "jobTitle",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "岗位/职务",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "is_active",
+          "property": "isActive",
+          "type": "BOOLEAN",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "是否在职可用",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "project_membership",
+      "class_name": "ProjectMembership",
+      "display_name": "项目成员关系",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "project_id",
+          "property": "projectId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属项目，关联 project_profile.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "participant_id",
+          "property": "participantId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "成员，关联 project_participant.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "project_role",
+          "property": "projectRole",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "成员在项目中的角色：项目经理/开发/测试等",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 30
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "project_profile",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "project_task",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "project_participant",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "project_membership",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "project、task、project_member 三个实体名已被占用，故本模型使用 project_profile（项目）、project_task（任务）、project_participant（成员）、project_membership（项目成员关系）命名",
+    "工时以小时为单位，允许填 0，保留 1 位小数；工时由任务负责人在任务上直接填报，不做按人按天明细拆分",
+    "“普通成员只能看自己参与的项目”通过 project_membership 判定数据权限：非管理员角色仅能访问存在本人成员关系的项目及其任务",
+    "任务负责人与项目负责人均要求是该项目的成员，属跨表校验，由业务层保证，不建模为规则",
+    "项目截止日期可空，任务计划完成日期可空；不强制任务日期早于项目截止日期",
+    "is_active 为真的成员才可被选为任务负责人或加入项目",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

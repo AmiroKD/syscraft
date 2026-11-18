@@ -1,0 +1,177 @@
+{
+  "model_version": "v44",
+  "entities": [
+    {
+      "entity": "claim_form",
+      "class_name": "ClaimForm",
+      "display_name": "报销单",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "form_no",
+          "property": "formNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "报销单号，业务人工/规则生成的唯一编号，如 BX20240001",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 32
+        },
+        {
+          "column": "claimant",
+          "property": "claimant",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销人姓名（登记口径，不强制关联系统账号）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 64
+        },
+        {
+          "column": "reason",
+          "property": "reason",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销事由，概述本次报销用途",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "total_amount",
+          "property": "totalAmount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销总金额（人民币元，DECIMAL(12,2)），由该单下所有明细金额汇总得出，不由人工录入",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "claim_detail",
+      "class_name": "ClaimDetail",
+      "display_name": "报销明细",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "purpose",
+          "property": "purpose",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "明细用途，如交通费、住宿费、办公用品等费用说明",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "amount",
+          "property": "amount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "明细金额（人民币元，DECIMAL(12,2)），必须大于 0",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "claim_form_id",
+          "property": "claimFormId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属报销单 ID，外键指向 claim_form.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "claim_form",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "claim_detail",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "金额统一按人民币元、保留两位小数登记，不做税额拆分（按含税金额登记）。",
+    "total_amount 为跨表汇总结果：保存/修改明细时由服务端对该单下 claim_detail.amount 求和回写，数据库不做触发器级联，故在规则中声明为 computed 并在应用层保证一致性。",
+    "单号 form_no 由系统按前缀+日期+流水生成，全局唯一，不允许人工重复提交。",
+    "一张报销单至少含一条明细；明细为空时总金额为 0，业务上不予提交（由前端/服务层校验）。",
+    "本次需求为报销登记，不含审批流转与付款状态，故不设置 status 字段；后续如需审批再加状态机。",
+    "报销人以文本姓名登记，不强制关联系统账号；如需与员工账号打通，可后续扩展 user_id 外键。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

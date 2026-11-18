@@ -1,0 +1,189 @@
+{
+  "model_version": "v10",
+  "entities": [
+    {
+      "entity": "activity_info",
+      "class_name": "ActivityInfo",
+      "display_name": "活动",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "activity_name",
+          "property": "activityName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "start_time",
+          "property": "startTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动开始时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "location",
+          "property": "location",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动地点",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 200
+        },
+        {
+          "column": "capacity",
+          "property": "capacity",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "活动容量（可报名人数上限）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "activity_signup",
+      "class_name": "ActivitySignup",
+      "display_name": "报名记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "activity_info_id",
+          "property": "activityInfoId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属活动ID（外键 -> activity_info.id）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "signer_name",
+          "property": "signerName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "contact",
+          "property": "contact",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "联系方式（手机号/邮箱等）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "signup_time",
+          "property": "signupTime",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报名提交时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "activity_info",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "activity_signup",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "已存在同名业务概念 activity、signup，为避免重名，活动表命名为 activity_info，报名记录表命名为 activity_signup。",
+    "报名人数不得超过活动容量：属跨表累计校验（COUNT(activity_signup) <= activity_info.capacity），需业务层在报名提交时校验，不建模为单表规则。",
+    "同一活动下同一联系方式默认只允许一条有效报名记录，由业务层查重保证，不建模为数据库唯一约束。",
+    "报名时间取用户提交时刻，由系统写入，默认等于记录创建时间。",
+    "联系方式按字符串存储，不强制格式校验（兼容手机号、邮箱等）。",
+    "报名记录为纯登记类数据，不设状态流转；如需取消报名，后续可增加状态字段。",
+    "一个活动对应多条报名记录（一对多），报名记录必须归属于一个已存在的活动。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

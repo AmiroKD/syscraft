@@ -1,0 +1,113 @@
+{
+  "model_version": "v21",
+  "entities": [
+    {
+      "entity": "duty_roster",
+      "class_name": "DutyRoster",
+      "display_name": "值班安排",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "duty_date",
+          "property": "dutyDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "值班日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "shift_code",
+          "property": "shiftCode",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "班次编码，取值：早/中/晚",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 10
+        },
+        {
+          "column": "duty_person",
+          "property": "dutyPerson",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "值班人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "contact",
+          "property": "contact",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "值班人联系方式（手机号）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注，如调班说明",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "duty_roster",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "「同一日期同一班次只能排一个人」通过 duty_roster 上 (duty_date, shift_code) 组合唯一约束实现，跨表/组合唯一规则不在三种规则形态内，故写入假设，由建表时加唯一索引保证",
+    "系统中已存在 duty_schedule、duty_shift，为避免重名，本次新建实体命名为 duty_roster",
+    "班次以字符串编码存储（早/中/晚），不单独建班次字典表",
+    "值班人以姓名字符串记录，不关联员工/用户主数据表；联系方式统一存手机号文本，不拆分省市区与座机",
+    "一条值班安排只对应一名值班人，不做多人同班次共排",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

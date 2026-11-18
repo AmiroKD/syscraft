@@ -1,0 +1,223 @@
+{
+  "model_version": "v22",
+  "entities": [
+    {
+      "entity": "expense_claim",
+      "class_name": "ExpenseClaim",
+      "display_name": "报销单",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "claim_no",
+          "property": "claimNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "报销单号，系统生成、全局唯一，如 BX2024050001",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 32
+        },
+        {
+          "column": "claimant",
+          "property": "claimant",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销人姓名（文本登记，暂不关联用户账号）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 64
+        },
+        {
+          "column": "reason",
+          "property": "reason",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "报销事由，整体说明本次报销的用途",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "total_amount",
+          "property": "totalAmount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销总金额（元，两位小数），等于该单据下各明细行金额之和，由应用层汇总写入",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销单状态：草稿/已提交/已审批/已驳回/已支付",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "claim_date",
+          "property": "claimDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "报销发生（申请）日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "expense_item",
+      "class_name": "ExpenseItem",
+      "display_name": "报销明细",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "claim_id",
+          "property": "claimId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属报销单 ID，外键指向 expense_claim.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "purpose",
+          "property": "purpose",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "明细用途，如交通费、餐费、办公用品",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "amount",
+          "property": "amount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "明细金额（元，两位小数）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "seq_no",
+          "property": "seqNo",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "明细行序号，用于前端展示排序",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "expense_claim",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "expense_item",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "总金额 = 各明细金额之和属于跨表汇总，不属于支持的三类规则，故由应用层在保存明细/提交时求和并写入 expense_claim.total_amount，编辑明细后需重算。",
+    "金额按含税人民币、两位小数存储；不做多币种与汇率处理。",
+    "报销单号由系统按规则生成并唯一，不允许人工重复；默认不要求手工录入。",
+    "报销人以姓名字段文本登记，暂不关联系统用户表；如需归属到账号可后续加 claimant_id。",
+    "状态流转（草稿→已提交→已审批→已支付，可驳回回草稿）为按常规报销流程推断，需求未显式提出审批环节。",
+    "仅支持报销登记与状态跟踪，不支持付款流水、发票附件上传与会计科目映射。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

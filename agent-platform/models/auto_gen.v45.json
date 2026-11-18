@@ -1,0 +1,187 @@
+{
+  "model_version": "v45",
+  "entities": [
+    {
+      "entity": "student_member",
+      "class_name": "StudentMember",
+      "display_name": "社团会员",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "member_name",
+          "property": "memberName",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "会员姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "student_no",
+          "property": "studentNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "学号，唯一标识会员",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 30
+        },
+        {
+          "column": "department",
+          "property": "department",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "所属院系",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "join_date",
+          "property": "joinDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "入社日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "member_fee_record",
+      "class_name": "MemberFeeRecord",
+      "display_name": "会员缴费记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "member_id",
+          "property": "memberId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属会员ID，关联 student_member.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "fee_amount",
+          "property": "feeAmount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "缴费金额（元，保留2位小数）",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 10
+        },
+        {
+          "column": "fee_date",
+          "property": "feeDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "缴费日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "is_received",
+          "property": "isReceived",
+          "type": "BOOLEAN",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "是否已到账",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "student_member",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "member_fee_record",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "学号在社团内唯一，作为会员业务主键外的唯一标识",
+    "缴费金额为人民币金额，必须大于 0，不做税费拆分",
+    "是否到账使用布尔值表示，未提供部分到账/退费场景，如需要将新增状态字段",
+    "一个会员可有多条缴费记录（按期缴费），缴费记录只归属一个会员",
+    "未要求缴费汇总与欠费提醒，本模型仅保存明细，统计由查询聚合完成",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

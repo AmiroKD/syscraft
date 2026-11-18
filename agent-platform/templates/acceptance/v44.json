@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "modelVersion": "v44",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-claim_form",
+      "category": "interface",
+      "level": "block",
+      "title": "报销单 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/ClaimFormController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/claim_form",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-claim_form",
+      "category": "interface",
+      "level": "block",
+      "title": "报销单 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/ClaimFormService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/claim_form",
+        "entity": "claim_form",
+        "account": "__acc_admin__",
+        "updatableField": "reason",
+        "sample": {
+          "form_no": "TformNo",
+          "claimant": "Tclaimant",
+          "reason": "Treason",
+          "total_amount": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-claim_detail",
+      "category": "interface",
+      "level": "block",
+      "title": "报销明细 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/ClaimDetailController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/claim_detail",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-claim_detail",
+      "category": "interface",
+      "level": "block",
+      "title": "报销明细 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/ClaimDetailService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/claim_detail",
+        "entity": "claim_detail",
+        "account": "__acc_admin__",
+        "updatableField": "purpose",
+        "sample": {
+          "purpose": "Tpurpose",
+          "amount": 100,
+          "claim_form_id": 2,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/claim_form",
+        "entity": "claim_form",
+        "account": "__acc_admin__",
+        "sample": {
+          "form_no": "TformNo",
+          "claimant": "Tclaimant",
+          "reason": "Treason",
+          "total_amount": 100,
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": [
+          "form_no"
+        ]
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/claim_form/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/claim_form/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/claim_form/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

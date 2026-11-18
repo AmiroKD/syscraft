@@ -1,0 +1,222 @@
+{
+  "model_version": "v34",
+  "entities": [
+    {
+      "entity": "expense_report",
+      "class_name": "ExpenseReport",
+      "display_name": "报销单",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "report_no",
+          "property": "reportNo",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "报销单号，全局唯一，如 BX20240501001",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 32
+        },
+        {
+          "column": "claimant",
+          "property": "claimant",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销人姓名",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 64
+        },
+        {
+          "column": "reason",
+          "property": "reason",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "报销事由说明",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 255
+        },
+        {
+          "column": "total_amount",
+          "property": "totalAmount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "报销总金额，等于各明细行金额之和（由程序汇总写入）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "单据状态：draft草稿/submitted已提交/approved已审批/rejected已驳回/paid已打款",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "submit_date",
+          "property": "submitDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "提交报销的日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "expense_report_line",
+      "class_name": "ExpenseReportLine",
+      "display_name": "报销明细行",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "expense_report_id",
+          "property": "expenseReportId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属报销单ID，外键指向 expense_report.id",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "purpose",
+          "property": "purpose",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "费用用途，如交通费、住宿费、办公用品",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 200
+        },
+        {
+          "column": "amount",
+          "property": "amount",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "本条明细金额",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "expense_date",
+          "property": "expenseDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "费用发生日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "line_no",
+          "property": "lineNo",
+          "type": "INT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "明细行序号，用于单据内排序展示",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "expense_report",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "expense_report_line",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "报销单金额 = 各明细金额之和属于跨表汇总规则，规则引擎不支持，由应用层在保存/删除明细时重算并写入 expense_report.total_amount。",
+    "每张报销单至少保留一条明细行，删除最后一条明细时同步删除或禁止删除由应用层控制。",
+    "金额统一按含税金额登记，币种默认人民币，不做多币种换算。",
+    "报销人按姓名字符串登记，不强制关联系统用户表；如需关联员工档案可后续加 claimant_id 外键。",
+    "单据状态增加 rejected 分支（驳回后回到 draft 修改），已在 assumptions 中说明，state 规则以主流程 draft→submitted→approved→paid 表达。",
+    "单号 report_no 由系统按日期+流水号生成，业务侧不可重复。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

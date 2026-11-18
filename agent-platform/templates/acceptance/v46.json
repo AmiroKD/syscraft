@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "modelVersion": "v46",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-buyer",
+      "category": "interface",
+      "level": "block",
+      "title": "客户 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/BuyerController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/buyer",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-buyer",
+      "category": "interface",
+      "level": "block",
+      "title": "客户 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/BuyerService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/buyer",
+        "entity": "buyer",
+        "account": "__acc_admin__",
+        "updatableField": "remark",
+        "sample": {
+          "buyer_name": "TbuyerNam",
+          "contact_phone": "TcontactP",
+          "contact_other": "TcontactO",
+          "remark": "Tremark",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-merchandise",
+      "category": "interface",
+      "level": "block",
+      "title": "商品 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/MerchandiseController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/merchandise",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-merchandise",
+      "category": "interface",
+      "level": "block",
+      "title": "商品 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/MerchandiseService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/merchandise",
+        "entity": "merchandise",
+        "account": "__acc_admin__",
+        "updatableField": "goods_name",
+        "sample": {
+          "goods_name": "TgoodsNam",
+          "spec": "Tspec",
+          "standard_price": 100,
+          "enabled": true,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-sale_bill",
+      "category": "interface",
+      "level": "block",
+      "title": "订单 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/SaleBillController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/sale_bill",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-sale_bill",
+      "category": "interface",
+      "level": "block",
+      "title": "订单 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/SaleBillService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/sale_bill",
+        "entity": "sale_bill",
+        "account": "__acc_admin__",
+        "updatableField": "remark",
+        "sample": {
+          "bill_no": "TbillNo",
+          "buyer_id": 2,
+          "status": "Tstatus",
+          "total_amount": 100,
+          "bill_date": "2026-11-09",
+          "remark": "Tremark",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-sale_bill_line",
+      "category": "interface",
+      "level": "block",
+      "title": "订单明细 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/SaleBillLineController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/sale_bill_line",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-sale_bill_line",
+      "category": "interface",
+      "level": "block",
+      "title": "订单明细 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/SaleBillLineService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/sale_bill_line",
+        "entity": "sale_bill_line",
+        "account": "__acc_admin__",
+        "updatableField": null,
+        "sample": {
+          "bill_id": 2,
+          "merchandise_id": 2,
+          "quantity": 2,
+          "unit_price": 100,
+          "line_amount": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/buyer",
+        "entity": "buyer",
+        "account": "__acc_admin__",
+        "sample": {
+          "buyer_name": "TbuyerNam",
+          "contact_phone": "TcontactP",
+          "contact_other": "TcontactO",
+          "remark": "Tremark",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": []
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/buyer/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/buyer/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/buyer/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

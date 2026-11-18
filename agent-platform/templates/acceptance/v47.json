@@ -1,0 +1,269 @@
+{
+  "version": 1,
+  "modelVersion": "v47",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-track_project",
+      "category": "interface",
+      "level": "block",
+      "title": "项目 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/TrackProjectController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/track_project",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-track_project",
+      "category": "interface",
+      "level": "block",
+      "title": "项目 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/TrackProjectService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/track_project",
+        "entity": "track_project",
+        "account": "__acc_admin__",
+        "updatableField": "name",
+        "sample": {
+          "name": "Tname",
+          "deadline": "2026-11-09",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-track_member",
+      "category": "interface",
+      "level": "block",
+      "title": "成员 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/TrackMemberController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/track_member",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-track_member",
+      "category": "interface",
+      "level": "block",
+      "title": "成员 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/TrackMemberService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/track_member",
+        "entity": "track_member",
+        "account": "__acc_admin__",
+        "updatableField": "email",
+        "sample": {
+          "name": "Tname",
+          "email": "Temail",
+          "member_role": "TmemberRo",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-track_project_member",
+      "category": "interface",
+      "level": "block",
+      "title": "项目成员关系 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/TrackProjectMemberController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/track_project_member",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-track_project_member",
+      "category": "interface",
+      "level": "block",
+      "title": "项目成员关系 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/TrackProjectMemberService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/track_project_member",
+        "entity": "track_project_member",
+        "account": "__acc_admin__",
+        "updatableField": null,
+        "sample": {
+          "project_id": 2,
+          "member_id": 2,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-track_task",
+      "category": "interface",
+      "level": "block",
+      "title": "任务 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/TrackTaskController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/track_task",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-track_task",
+      "category": "interface",
+      "level": "block",
+      "title": "任务 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/TrackTaskService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/track_task",
+        "entity": "track_task",
+        "account": "__acc_admin__",
+        "updatableField": "title",
+        "sample": {
+          "title": "Ttitle",
+          "project_id": 2,
+          "owner_id": 2,
+          "status": "Tstatus",
+          "hours": 100,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/track_project",
+        "entity": "track_project",
+        "account": "__acc_admin__",
+        "sample": {
+          "name": "Tname",
+          "deadline": "2026-11-09",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": []
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/track_project/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/track_project/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/track_project/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}

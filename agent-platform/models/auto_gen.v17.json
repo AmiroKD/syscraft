@@ -1,0 +1,197 @@
+{
+  "model_version": "v17",
+  "entities": [
+    {
+      "entity": "equipment",
+      "class_name": "Equipment",
+      "display_name": "设备",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "name",
+          "property": "name",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "设备名称",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 100
+        },
+        {
+          "column": "code",
+          "property": "code",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": true,
+          "semantic": "设备编号，台账内唯一",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 50
+        },
+        {
+          "column": "purchase_date",
+          "property": "purchaseDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "购置日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "status",
+          "property": "status",
+          "type": "VARCHAR",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "设备状态：在用/维修/报废",
+          "visibility": "PLAIN",
+          "sensitive": false,
+          "length": 20
+        },
+        {
+          "column": "remark",
+          "property": "remark",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "备注",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    },
+    {
+      "entity": "maintenance_record",
+      "class_name": "MaintenanceRecord",
+      "display_name": "维修记录",
+      "owner_field": null,
+      "fields": [
+        {
+          "column": "id",
+          "property": "id",
+          "type": "BIGINT",
+          "primary_key": true,
+          "nullable": false,
+          "unique": true,
+          "semantic": "主键",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "equipment_id",
+          "property": "equipmentId",
+          "type": "BIGINT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "所属设备ID",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "maint_date",
+          "property": "maintDate",
+          "type": "DATE",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "维修日期",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "fault_desc",
+          "property": "faultDesc",
+          "type": "TEXT",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "故障描述",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "fee",
+          "property": "fee",
+          "type": "DECIMAL",
+          "primary_key": false,
+          "nullable": true,
+          "unique": false,
+          "semantic": "维修费用（元）",
+          "visibility": "PLAIN",
+          "sensitive": false
+        },
+        {
+          "column": "created_at",
+          "property": "createdAt",
+          "type": "DATETIME",
+          "primary_key": false,
+          "nullable": false,
+          "unique": false,
+          "semantic": "创建时间",
+          "visibility": "PLAIN",
+          "sensitive": false
+        }
+      ],
+      "rules": {
+        "computed": [],
+        "constraints": [],
+        "states": []
+      }
+    }
+  ],
+  "grants": [
+    {
+      "role": "USER",
+      "entity": "equipment",
+      "access": "READ"
+    },
+    {
+      "role": "USER",
+      "entity": "maintenance_record",
+      "access": "READ"
+    }
+  ],
+  "assumptions": [
+    "设备编号为业务唯一标识，由录入人填写，系统不做自动生成。",
+    "设备状态默认新建时为「在用」，发生维修时置为「维修」，维修完成回到「在用」，确认淘汰时置为「报废」；该状态联动属于跨表业务流程，由操作规范约束。",
+    "维修费用以人民币元为单位记录，允许 2 位小数，未产生费用或暂未确定时可为空。",
+    "维修记录只归属于一台设备，设备删除前需先处理其维修记录（不做级联删除）。",
+    "购置日期不允许晚于当前日期，该跨字段校验在录入界面完成。",
+    "建议角色未自动创建（是否创建由用户确认）；内置 USER 角色默认只读，写入权需管理员显式上调"
+  ]
+}

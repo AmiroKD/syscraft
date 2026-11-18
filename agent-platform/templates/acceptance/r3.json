@@ -58,12 +58,12 @@
         "base": "/api/biz/reg_payment",
         "entity": "reg_payment",
         "account": "__acc_admin__",
+        "updatableField": "payer",
         "sample": {
           "bill_no": "TbillNo",
           "payer": "Tpayer",
           "qty": 2,
           "price": 100,
-          "amount": null,
           "status": "PENDING",
           "created_at": "2026-11-09T10:00:00"
         }
@@ -87,7 +87,6 @@
           "payer": "Tpayer",
           "qty": 2,
           "price": 100,
-          "amount": null,
           "status": "PENDING",
           "created_at": "2026-11-09T10:00:00"
         },

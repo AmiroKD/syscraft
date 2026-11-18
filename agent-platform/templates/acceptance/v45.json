@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "modelVersion": "v45",
+  "accounts": [
+    {
+      "role": "SUPER_ADMIN",
+      "username": "__acc_admin__",
+      "usernameRef": "env:ADMIN_USER",
+      "passwordRef": "env:ADMIN_INIT_PWD"
+    },
+    {
+      "role": "USER",
+      "username": "__acc_user__",
+      "passwordRef": "env:ACC_USER_PWD"
+    }
+  ],
+  "cases": [
+    {
+      "id": "health",
+      "category": "service",
+      "level": "block",
+      "title": "健康检查为 UP",
+      "check": {
+        "type": "health",
+        "path": "/actuator/health"
+      }
+    },
+    {
+      "id": "endpoints-student_member",
+      "category": "interface",
+      "level": "block",
+      "title": "社团会员 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/StudentMemberController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/student_member",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-student_member",
+      "category": "interface",
+      "level": "block",
+      "title": "社团会员 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/StudentMemberService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/student_member",
+        "entity": "student_member",
+        "account": "__acc_admin__",
+        "updatableField": "department",
+        "sample": {
+          "member_name": "TmemberNa",
+          "student_no": "TstudentN",
+          "department": "Tdepartme",
+          "join_date": "2026-11-09",
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "endpoints-member_fee_record",
+      "category": "interface",
+      "level": "block",
+      "title": "会员缴费记录 五个端点均存在",
+      "suspects": [
+        "src/main/java/com/generated/generated/controller/MemberFeeRecordController.java"
+      ],
+      "check": {
+        "type": "endpoints",
+        "base": "/api/biz/member_fee_record",
+        "ops": [
+          "query",
+          "aggregate",
+          "insert",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    {
+      "id": "crud-member_fee_record",
+      "category": "interface",
+      "level": "block",
+      "title": "会员缴费记录 增删改查往返一致",
+      "suspects": [
+        "src/main/java/com/generated/generated/service/MemberFeeRecordService.java"
+      ],
+      "check": {
+        "type": "crud",
+        "base": "/api/biz/member_fee_record",
+        "entity": "member_fee_record",
+        "account": "__acc_admin__",
+        "updatableField": null,
+        "sample": {
+          "member_id": 2,
+          "fee_amount": 100,
+          "fee_date": "2026-11-09",
+          "is_received": true,
+          "created_at": "2026-11-09T10:00:00"
+        }
+      }
+    },
+    {
+      "id": "confirm-reuse",
+      "category": "confirm",
+      "level": "block",
+      "title": "同一确认令牌不能核销两次",
+      "suspects": [
+        "src/main/java/com/generated/platform/confirm/ConfirmService.java"
+      ],
+      "check": {
+        "type": "confirmReuse",
+        "base": "/api/biz/student_member",
+        "entity": "student_member",
+        "account": "__acc_admin__",
+        "sample": {
+          "member_name": "TmemberNa",
+          "student_no": "TstudentN",
+          "department": "Tdepartme",
+          "join_date": "2026-11-09",
+          "created_at": "2026-11-09T10:00:00"
+        },
+        "unique_fields": [
+          "student_no"
+        ]
+      }
+    },
+    {
+      "id": "auth-401",
+      "category": "permission",
+      "level": "block",
+      "title": "无令牌访问返回 401",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/SaTokenConfig.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/student_member/query",
+        "expect": 401,
+        "auth": "none"
+      }
+    },
+    {
+      "id": "perm-403",
+      "category": "permission",
+      "level": "block",
+      "title": "普通用户删除未经授权返回 403",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/student_member/delete",
+        "expect": 403,
+        "auth": "__acc_user__",
+        "auth_body": {
+          "ids": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "id": "perm-200",
+      "category": "permission",
+      "level": "block",
+      "title": "超管查询返回 200",
+      "suspects": [
+        "src/main/java/com/generated/platform/security/PermissionCodeResolver.java"
+      ],
+      "check": {
+        "type": "status",
+        "path": "/api/biz/student_member/query",
+        "expect": 200,
+        "auth": "__acc_admin__",
+        "auth_body": {}
+      }
+    }
+  ]
+}
